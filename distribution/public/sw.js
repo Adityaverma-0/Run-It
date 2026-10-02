@@ -1,4 +1,4 @@
-const CACHE = "sanket-shell-v1";
+const CACHE = "sanket-shell-v2";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) =>
   e.waitUntil(
@@ -17,8 +17,6 @@ self.addEventListener("fetch", (event) => {
     r.method !== "GET" ||
     u.origin !== location.origin ||
     u.pathname.startsWith("/api/") ||
-    u.pathname.includes("chatgpt") ||
-    u.pathname === "/callback" ||
     r.headers.get("accept")?.includes("text/x-component") ||
     u.pathname.includes("@") ||
     u.pathname.includes("node_modules")

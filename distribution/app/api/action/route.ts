@@ -1,22 +1,10 @@
 import { member, responseError, AppError } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { validate } from "@/lib/validation";
+import { readJSON } from "@/lib/request";
 export async function POST(req: Request) {
   try {
-    const origin = req.headers.get("origin");
-    if (!origin || origin !== new URL(req.url).origin)
-      throw new AppError("Request origin not allowed", 403);
-    if (!req.headers.get("content-type")?.includes("application/json"))
-      throw new AppError("JSON is required");
-    const text = await req.text();
-    if (text.length > 100000)
-      throw new AppError("This request is too large", 413);
-    let body;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      throw new AppError("Invalid JSON");
-    }
+    const body = await readJSON(req);
     if (
       !/^[0-9a-f-]{36}$/i.test(body.requestId || "") ||
       typeof body.action !== "string" ||

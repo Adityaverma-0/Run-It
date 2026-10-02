@@ -292,9 +292,10 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
                 Account active
               </label>
               <p className="form-help full">
-                Members sign in with this email through ChatGPT. Site sharing
-                must also allow them access. Saving an account does not send an
-                invitation.
+                After saving, create an access link in Team & access so this
+                person can choose a password. Changing their email removes the
+                old login; create a fresh access link for their new email. No
+                email is sent automatically.
               </p>
             </>
           )}

@@ -1,18 +1,21 @@
 # Sanket Distribution
 
-A responsive wholesale FMCG distribution workspace with a restrained claymorphism interface. Uses React, Vinext, TypeScript and Neon PostgreSQL. No seed or demonstration records are included.
+A responsive wholesale FMCG distribution workspace with a restrained claymorphism interface. Uses React, Next.js, TypeScript and Neon PostgreSQL. No seed or demonstration records are included.
 
 ## Run locally
 
 ```sh
 npm ci
 cp .env.example .env
-# Put your Neon connection string in DATABASE_URL, server-side only.
+# Set DATABASE_URL, your OWNER_EMAIL, and a random OWNER_SETUP_TOKEN.
+# Generate the setup token: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 npm run db:migrate
 npm run dev
 ```
 
-Open the Local URL printed by the dev server. Local sign-in uses the Sites starter's loopback-only preview session; it is not persisted as a business user. Production uses verified ChatGPT identity and server-side role checks. The initial authenticated visitor to the owner-private deployment becomes the business owner, including when staff have already been added in the local preview. Keep the deployment private until the owner has signed in.
+Open http://127.0.0.1:5173 and choose **First-time owner setup**. Enter your real name, the configured owner email and setup token, and choose a password of at least 12 characters. No user or business records are created until you submit the form. Development and production use the same real authentication; there is no preview bypass.
+
+Keep `OWNER_SETUP_TOKEN` private: it authorizes initial setup and owner password recovery. Staff cannot self-register.
 
 ## First working day
 
@@ -31,7 +34,9 @@ Open the Local URL printed by the dev server. Local sign-in uses the Sites start
 
 ## Roles and access
 
-Owner, warehouse manager, warehouse staff, sales manager, salesman and accountant have different navigation and permitted operations. Salesmen can act only on their assigned vehicles and route customers. Authorization is enforced on the server; changing visible navigation cannot grant access. Staff must be allowed by both Site sharing and their registered active account. Adding a member does not send email. Password recovery is handled by ChatGPT or the chosen identity provider.
+Owner, warehouse manager, warehouse staff, sales manager, salesman and accountant have different navigation and permitted operations. Salesmen can act only on their assigned vehicles and route customers. Authorization is enforced on the server; changing visible navigation cannot grant access. In Settings → Team & access, add an actual team member, then use **Access link** to create a private activation link. Share that link with the intended person; no email is sent automatically. It expires after 24 hours, works once, and requires the registered email. A new link cancels the previous link and can also reset a forgotten password. Passwords use salted scrypt hashes; opaque session tokens are stored only as hashes. Sessions expire after seven days. Authentication has database-backed throttling that survives restarts.
+
+Use the account avatar to change your password. Resetting or changing a password revokes previous sessions. Deactivating a user revokes their sessions and activation links immediately. Changing a user's email also removes their old password and requires a fresh access link. Owner recovery is available under Forgot password → Recover owner account using `OWNER_EMAIL` and `OWNER_SETUP_TOKEN`. Authentication never trusts browser-supplied identity headers.
 
 ## Data integrity
 
@@ -61,18 +66,46 @@ Daily sales, vehicle sales, salesman performance, product sales, warehouse stock
 
 ```sh
 npm run typecheck
+npm run test:auth
 npm run build
 node scripts/test-db.mjs
+# With the production server running locally on port 5173:
+node tests/http-smoke.mjs
 ```
 
-The integration test creates an isolated test schema inside a transaction and rolls the entire schema and fixtures back. It never inserts fixtures into application tables. It checks overselling, warehouse limits, credit limits, discounted tax, overpayment, invoice allocation, unauthorized roles, idempotent retries, HOLD carry-forward, next-day dispatch, complete UNLOAD and stock conservation.
+The integration test creates an isolated test schema inside a transaction and rolls the entire schema and fixtures back. It never inserts fixtures into application tables. It also checks owner setup/recovery, one-time/expired access links, session revocation, inactive users and authentication throttling. It checks overselling, warehouse limits, credit limits, discounted tax, overpayment, invoice allocation, unauthorized roles, idempotent retries, HOLD carry-forward, next-day dispatch, complete UNLOAD and stock conservation.
 
-Database access tests and migrations require the PostgreSQL `psql` CLI. Development previews bypass service-worker caching so edits appear immediately. Runtime access uses Neon's HTTP driver and works in Cloudflare Workers without TCP sockets.
+The isolated SQL integration tests require the PostgreSQL `psql` CLI. Normal migrations and deployment use the Node PostgreSQL client and do not need `psql`. Development bypasses service-worker caching so edits appear immediately.
 
-## Deployment
+## Deploy on Render
 
-The private Site is identified by `.openai/hosting.json`. Set DATABASE_URL as a secret runtime environment variable. Do not place credentials in the hosting manifest, frontend variables, source control, logs or browser bundles. Build output is `dist/server/index.js` (Worker) and `dist/client` (assets). The local `.env` is ignored. Schema migrations are explicit and rerunnable; review schema changes before applying them to a populated database.
+Create a **Node Web Service**, with these fields:
+
+| Field             | Value                                   |
+| ----------------- | --------------------------------------- |
+| Branch            | `main`                                  |
+| Root directory    | `distribution`                          |
+| Build command     | `npm ci --include=dev && npm run build` |
+| Start command     | `npm start`                             |
+| Health check path | `/api/health`                           |
+
+Add server environment variables:
+
+- `DATABASE_URL`: your Neon PostgreSQL connection string, including its SSL parameters.
+- `OWNER_EMAIL`: your real owner email address.
+- `OWNER_SETUP_TOKEN`: a private random secret of at least 32 characters. Generate one with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` or Render's secret generator.
+- `NODE_VERSION`: `22`.
+- `NODE_ENV`: `production`.
+- Optional `APP_URL`: the exact HTTPS origin if you use a custom domain. For the default Render domain, the app uses Render's automatic `RENDER_EXTERNAL_URL` value. Requests must originate from this canonical origin.
+
+The repository-root `render.yaml` contains the equivalent Blueprint configuration; choose **New → Blueprint** to use it instead of the manual form. The Blueprint generates `OWNER_SETUP_TOKEN` automatically; retrieve it from the service's environment settings for first setup.
+
+`npm start` applies the idempotent migrations in one transaction, then starts Next.js on `0.0.0.0` using Render's `PORT` (default `10000`). A failed migration stops startup rather than starting a broken app. `/api/health` checks the database and authentication schema without disclosing connection details. Migrations use transaction-level locking compatible with Neon's pooled endpoint. No seed data is added. All 21 tables are in the **distribution** schema; select that schema in Neon's Tables view.
+
+After the deployment becomes healthy, open its HTTPS URL and complete **First-time owner setup**. The app then opens an empty workspace ready for your actual records. Keep the setup secret private and rotate it if it is exposed.
+
+Push the updated source to your connected repository before deploying. This workspace change does not itself upload or publish the application. Do not put secrets in `NEXT_PUBLIC_*` variables, source control, logs or browser bundles. The local `.env` is ignored. The old Sites/Worker tooling is unused by the default build and start commands.
 
 ## Practical limits
 
-The app currently serves one business and one warehouse. The state endpoint returns its authorized history in one snapshot, which suits a small distribution operation; add server-side pagination and aggregate endpoints before very large datasets. Offline synchronization has been implemented but should also be acceptance-tested on the actual field devices and networks. Access sharing, external identity recovery and installation prompts are handled by their respective platforms.
+The app currently serves one business and one warehouse. The state endpoint returns its authorized history in one snapshot, which suits a small distribution operation; add server-side pagination and aggregate endpoints before very large datasets. Offline synchronization has been implemented but should also be acceptance-tested on the actual field devices and networks. Staff activation and recovery use owner-generated links; no email delivery service is configured. Installation prompts are provided by the browser.

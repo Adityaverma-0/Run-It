@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { InviteButton } from "./access";
 import {
   AreaChart,
   Area,
@@ -2367,17 +2368,24 @@ export function SettingsPage({ s, open }: PageProps) {
                 r.role === "owner" ? (
                   <span className="muted small">Owner</span>
                 ) : (
-                  <button className="text-link" onClick={() => open("user", r)}>
-                    Edit member
-                  </button>
+                  <div className="flex-row flex-wrap">
+                    <button
+                      className="text-link"
+                      onClick={() => open("user", r)}
+                    >
+                      Edit member
+                    </button>
+                    <InviteButton user={r} />
+                  </div>
                 ),
             },
           ]}
           empty="No team members added"
         />
         <p className="form-help mt-4">
-          Each person signs in with ChatGPT using their registered email. Site
-          sharing and the account role both control access.
+          Add a member, then create an access link for them to choose a
+          password. Use a new access link to reset a forgotten password.
+          Inactive accounts cannot sign in.
         </p>
       </section>
       <section className="clay panel">

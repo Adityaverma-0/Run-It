@@ -9,10 +9,20 @@ const url =
     ?.slice(13);
 const schema = "distribution_test_" + Date.now();
 const migration = fs
-  .readFileSync("db/001_schema.sql", "utf8")
-  .replace(/^BEGIN;/, "")
-  .replace(/COMMIT;\s*$/, "");
-const tests = fs.readFileSync("tests/business.sql", "utf8");
+  .readdirSync("db")
+  .filter((f) => /^\d+.*\.sql$/.test(f))
+  .sort()
+  .map((f) =>
+    fs
+      .readFileSync(`db/${f}`, "utf8")
+      .replace(/^BEGIN;/, "")
+      .replace(/COMMIT;\s*$/, ""),
+  )
+  .join("\n");
+const tests =
+  fs.readFileSync("tests/business.sql", "utf8") +
+  "\n" +
+  fs.readFileSync("tests/auth.sql", "utf8");
 const sql =
   "BEGIN;\n" +
   (migration + tests).replaceAll("distribution", schema) +

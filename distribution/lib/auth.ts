@@ -1,4 +1,5 @@
-import { getChatGPTUser } from "@/app/chatgpt-auth";
+import { cookies } from "next/headers";
+import { digest, newToken, sessionSeconds } from "./auth-crypto.ts";
 import { query } from "./db";
 export type Member = {
   id: string | null;
@@ -17,33 +18,59 @@ export class AppError extends Error {
   }
 }
 export async function member(): Promise<Member> {
-  const user = await getChatGPTUser();
-  if (!user) throw new AppError("Sign in to continue", 401);
-  // The starter injects this identity only on loopback during development. Never persist its mock profile.
-  if (process.env.NODE_ENV !== "production" && user.userId === "local_seedy")
-    return {
-      id: null,
-      name: "Sanket",
-      email: "",
-      role: "owner",
-      key: "local-preview",
-      preview: true,
-    };
+  const token = (await cookies()).get(cookieName)?.value;
+  if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token))
+    throw new AppError("Sign in to continue", 401);
   const rows = await query(
-    "SELECT distribution.resolve_member($1,$2) AS member",
-    [user.email, user.fullName || user.email],
+    "SELECT u.id,u.name,u.email,u.role FROM distribution.auth_sessions s JOIN distribution.users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active",
+    [digest(token)],
   );
-  const u = rows[0]?.member;
-  if (!u)
-    throw new AppError(
-      "Your account does not have access. Ask your owner to add your email.",
-      403,
-    );
-  return { ...u, key: user.userId };
+  const u = rows[0];
+  if (!u) throw new AppError("Your session expired. Sign in again.", 401);
+  return { ...u, key: u.id } as Member;
+}
+export const cookieName = "sanket_session";
+export const cookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: sessionSeconds,
+});
+export async function createSession(
+  userId: string,
+  expectedPasswordHash: string,
+) {
+  const token = newToken();
+  const rows = await query(
+    "SELECT distribution.auth_session($1,$2::uuid,$3) AS user_id",
+    [digest(token), userId, expectedPasswordHash],
+  );
+  if (!rows[0]?.user_id)
+    throw new AppError("Your account changed. Please sign in again.", 401);
+  const jar = await cookies();
+  const previous = jar.get(cookieName)?.value;
+  if (previous)
+    await query("DELETE FROM distribution.auth_sessions WHERE token_hash=$1", [
+      digest(previous),
+    ]);
+  jar.set(cookieName, token, cookieOptions());
+}
+export async function endSession() {
+  const jar = await cookies();
+  const token = jar.get(cookieName)?.value;
+  if (token)
+    await query("DELETE FROM distribution.auth_sessions WHERE token_hash=$1", [
+      digest(token),
+    ]);
+  jar.set(cookieName, "", { ...cookieOptions(), maxAge: 0 });
 }
 export function responseError(error: unknown) {
   if (error instanceof AppError)
-    return Response.json({ error: error.message }, { status: error.status });
+    return Response.json(
+      { error: error.message },
+      { status: error.status, headers: { "Cache-Control": "no-store" } },
+    );
   const e = error as any;
   const business = e.code === "P0001";
   const duplicate = e.code === "23505";
@@ -65,6 +92,9 @@ export function responseError(error: unknown) {
             ? "Please check the entered values and linked records."
             : "The database is unavailable. Your changes have not been confirmed. Please retry.",
     },
-    { status: business || duplicate || constraint ? 400 : 503 },
+    {
+      status: business || duplicate || constraint ? 400 : 503,
+      headers: { "Cache-Control": "no-store" },
+    },
   );
 }

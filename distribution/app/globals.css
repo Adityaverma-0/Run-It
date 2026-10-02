@@ -826,6 +826,7 @@ svg {
 }
 .login-card {
   display: flex;
+  min-width: 0;
   justify-content: center;
   align-items: center;
   padding: 30px;
@@ -845,6 +846,25 @@ svg {
 .login-card p {
   font-size: 14px;
   line-height: 1.8;
+}
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 22px;
+}
+.login-card .stack .btn {
+  margin-top: 4px;
+}
+.login-card .stack p {
+  margin: 0;
+  font-size: 12px;
+}
+.login-card > div {
+  min-width: 0;
+  max-width: 440px;
+  width: 100%;
 }
 .mobile-actions {
   display: grid;

@@ -68,6 +68,7 @@ import {
   SettingsPage,
 } from "./pages";
 import Reports from "./reports";
+import { AccessScreen, PasswordDialog, authRequest } from "./access";
 import RecordForm, { TransactionForm, ReconcileForm } from "./forms";
 import {
   permissions,
@@ -151,7 +152,7 @@ export default function Workspace() {
   const syncLock = useRef(false);
   const [discard, setDiscard] = useState<Pending | null>(null);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
-  const [recovery, setRecovery] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [lastSync, setLastSync] = useState("");
   const updateQueue = useCallback(async () => {
     const all = await readLocal("queue");
@@ -403,90 +404,20 @@ export default function Workspace() {
     return result;
   }
   async function signOut() {
-    await clearLocal();
-    if ("caches" in window) {
-      for (const key of await caches.keys())
-        if (key.startsWith("sanket-")) await caches.delete(key);
+    try {
+      await authRequest("logout");
+      await clearLocal();
+      if ("caches" in window) {
+        for (const key of await caches.keys())
+          if (key.startsWith("sanket-")) await caches.delete(key);
+      }
+      location.href = "/";
+    } catch (e: any) {
+      toast.error(e.message || "Unable to sign out. Please retry.");
     }
-    location.href = "/signout-with-chatgpt?return_to=%2F";
   }
   if (auth || (!s && !loading && !error))
-    return (
-      <>
-        <div className="login">
-          <section className="login-brand">
-            <img src="/favicon.svg" alt="Sanket" width="65" />
-            <h1>
-              Every box.
-              <br />
-              Every route.
-              <br />
-              One clear picture.
-            </h1>
-            <p style={{ color: "#b5c7d9", lineHeight: 1.9 }}>
-              Your warehouse, sales and collections.
-              <br />
-              Connected from the first load to the last stop.
-            </p>
-          </section>
-          <section className="login-card">
-            <div className="clay">
-              <img src="/favicon.svg" alt="" width="46" />
-              <h2>{auth === 403 ? "Access needed" : "Welcome to Sanket."}</h2>
-              <p className="muted">
-                {auth === 403
-                  ? error
-                  : "Sign in to your distribution workspace and pick up where you left off."}
-              </p>
-              <a
-                className="btn btn-primary"
-                href={
-                  auth === 403
-                    ? "/signout-with-chatgpt?return_to=%2F"
-                    : "/signin-with-chatgpt?return_to=%2F"
-                }
-                target="_top"
-              >
-                {auth === 403
-                  ? "Sign in with another account"
-                  : "Sign in with ChatGPT"}
-              </a>
-              <button
-                className="text-link block mx-auto mt-5"
-                onClick={() => setRecovery(true)}
-              >
-                Need help signing in?
-              </button>
-              <p className="form-help mt-6">
-                Secure access · Role-based permissions
-              </p>
-            </div>
-          </section>
-        </div>
-        <Modal
-          open={recovery}
-          onClose={() => setRecovery(false)}
-          title="Recover account access"
-          description="Your workspace uses your ChatGPT account."
-        >
-          <p className="muted">
-            Use “Forgot password” on the ChatGPT sign-in page to reset your
-            password. If you sign in through Google, Apple or Microsoft, recover
-            access with that provider. For a role or access issue, ask your
-            business owner to check your registered email.
-          </p>
-          <div className="form-actions">
-            <a
-              className="btn btn-primary"
-              href="/signin-with-chatgpt?return_to=%2F"
-              target="_top"
-            >
-              Open secure sign-in
-            </a>
-          </div>
-        </Modal>
-      </>
-    );
+    return <AccessScreen onSuccess={() => refresh()} />;
   const role = s?.user.role || "owner";
   const nav = links.filter(
     ([id]) =>
@@ -659,10 +590,9 @@ export default function Workspace() {
             </button>
             <button
               className="avatar"
-              onClick={() =>
-                role === "owner" ? go("settings") : setLogoutConfirm(true)
-              }
-              aria-label="Account"
+              onClick={() => setPasswordOpen(true)}
+              aria-label="Account: change password"
+              title="Change password"
             >
               {initials}
             </button>
@@ -974,6 +904,7 @@ export default function Workspace() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {passwordOpen && <PasswordDialog close={() => setPasswordOpen(false)} />}
       <AlertDialog open={logoutConfirm} onOpenChange={setLogoutConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
