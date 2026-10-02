@@ -43,12 +43,13 @@ type Props = {
   save: (action: string, data: Row) => Promise<any>;
 };
 const defaults: Record<string, Row> = {
+  item_type: { name: "", kind: "category" },
   product: {
     name: "",
     sku: "",
     brand: "",
     category: "",
-    unit: "Packet",
+    unit: "",
     box_size: 1,
     carton_size: 1,
     price: 0,
@@ -133,6 +134,7 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
     }
   }
   const titles: Record<string, string> = {
+    item_type: "item type",
     product: "product",
     customer: "customer",
     vehicle: "vehicle",
@@ -159,6 +161,34 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
     >
       <form onSubmit={submit} className="stack">
         <div className="form-grid">
+          {kind === "item_type" && (
+            <>
+              {initial?.id ? (
+                <div className="field">
+                  <label>Type</label>
+                  <p>
+                    {initial.kind === "category"
+                      ? "Product category"
+                      : "Packaging unit"}
+                  </p>
+                </div>
+              ) : (
+                pick("kind", "Type", [
+                  { value: "category", label: "Product category" },
+                  { value: "unit", label: "Packaging unit" },
+                ])
+              )}
+              {input("name", "Item type name", "text", {
+                required: true,
+                maxLength: 500,
+              })}
+              <p className="form-help full">
+                {initial?.id
+                  ? "Renaming updates the label on linked products. Stock quantities and box/carton ratios stay the same."
+                  : "Add the categories or units used in your catalogue. No example types are added automatically."}
+              </p>
+            </>
+          )}
           {kind === "product" && (
             <>
               {input("name", "Product name", "text", {
@@ -167,15 +197,34 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
               })}
               {input("sku", "SKU", "text", { required: true, maxLength: 50 })}
               {input("brand", "Brand")}
-              {input("category", "Category")}
-              {pick("unit", "Base unit", [
-                "Packet",
-                "Piece",
-                "Bottle",
-                "Bag",
-                "Box",
-                "Carton",
-              ])}
+              {input("category", "Category", "text", {
+                list: "product-categories",
+                maxLength: 500,
+              })}
+              <datalist id="product-categories">
+                {(s.itemTypes || [])
+                  .filter((t) => t.kind === "category")
+                  .map((t) => (
+                    <option key={t.id} value={t.name} />
+                  ))}
+              </datalist>
+              {input("unit", "Base / packaging unit", "text", {
+                list: "product-units",
+                required: true,
+                maxLength: 500,
+              })}
+              <datalist id="product-units">
+                {(s.itemTypes || [])
+                  .filter((t) => t.kind === "unit")
+                  .map((t) => (
+                    <option key={t.id} value={t.name} />
+                  ))}
+              </datalist>
+              <p className="form-help full">
+                Choose an existing category and unit, or enter your own. New
+                names are saved under Item types. Box and carton quantities
+                below are multiples of the base unit.
+              </p>
               {input("price", "Selling price per base unit (₹)", "number", {
                 min: 0,
                 step: ".01",
@@ -249,9 +298,11 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
               ])}
               {pick(
                 "salesman_id",
-                "Assigned salesman",
+                "Assigned worker / salesperson",
                 s.users
-                  .filter((u) => u.role === "salesman" && u.active)
+                  .filter(
+                    (u) => ["salesman", "worker"].includes(u.role) && u.active,
+                  )
                   .map((u) => ({ value: u.id, label: u.name })),
                 "Unassigned",
               )}
@@ -262,7 +313,8 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
                 "Unassigned",
               )}
               <p className="form-help full">
-                Add team members in Settings before assigning a salesman.
+                The admin can add worker or sales accounts in Settings before
+                assigning them to a vehicle.
               </p>
             </>
           )}
@@ -1044,7 +1096,9 @@ export function ReconcileForm({ s, initial, close, save }: Props) {
                 !v ||
                 !valid ||
                 (variance &&
-                  (!["owner", "warehouse_manager"].includes(s.user.role) ||
+                  (!["owner", "warehouse_manager", "worker"].includes(
+                    s.user.role,
+                  ) ||
                     note.trim().length < 3))
               }
               onClick={() => setConfirm(true)}

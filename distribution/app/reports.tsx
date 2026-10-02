@@ -336,7 +336,11 @@ export default function Reports({ s }: PageProps) {
                 label="Salesman filter"
                 value={salesman}
                 onChange={setSalesman}
-                options={options(s.users.filter((u) => u.role === "salesman"))}
+                options={options(
+                  s.users.filter((u) =>
+                    ["salesman", "worker"].includes(u.role),
+                  ),
+                )}
                 placeholder="All salesmen"
               />
             </Field>

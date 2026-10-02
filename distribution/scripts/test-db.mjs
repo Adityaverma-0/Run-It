@@ -22,7 +22,9 @@ const migration = fs
 const tests =
   fs.readFileSync("tests/business.sql", "utf8") +
   "\n" +
-  fs.readFileSync("tests/auth.sql", "utf8");
+  fs.readFileSync("tests/auth.sql", "utf8") +
+  "\n" +
+  fs.readFileSync("tests/workers.sql", "utf8");
 const sql =
   "BEGIN;\n" +
   (migration + tests).replaceAll("distribution", schema) +

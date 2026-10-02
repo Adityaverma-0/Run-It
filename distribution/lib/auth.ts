@@ -87,7 +87,7 @@ export function responseError(error: unknown) {
       error: business
         ? e.message
         : duplicate
-          ? "This record already exists. Check its SKU, number or email."
+          ? "This name, SKU, number or email already exists."
           : constraint
             ? "Please check the entered values and linked records."
             : "The database is unavailable. Your changes have not been confirmed. Please retry.",

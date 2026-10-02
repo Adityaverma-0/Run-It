@@ -68,6 +68,7 @@ import {
   SettingsPage,
 } from "./pages";
 import Reports from "./reports";
+import { ItemTypes, DailyReports } from "./operations";
 import { AccessScreen, PasswordDialog, authRequest } from "./access";
 import RecordForm, { TransactionForm, ReconcileForm } from "./forms";
 import {
@@ -94,12 +95,14 @@ const links = [
   ["sales", "Sales", ShoppingCart],
   ["customers", "Customers", Users],
   ["products", "Products", Package],
+  ["item-types", "Item types", Package],
   ["inventory", "Inventory", Warehouse],
   ["vehicles", "Vehicles", Truck],
   ["loads", "Loads", ClipboardList],
   ["payments", "Payments", Wallet],
   ["routes", "Routes", Map],
   ["reports", "Reports", ChartNoAxesCombined],
+  ["daily-reports", "Daily reports", ClipboardCheck],
   ["reconciliation", "Reconciliation", ClipboardCheck],
   ["notifications", "Notifications", Bell],
   ["sync", "Sync center", Cloud],
@@ -108,6 +111,8 @@ const links = [
 const subtitles: Record<string, string> = {
   dashboard:
     "Here's your distribution overview. Every box, every route, every day.",
+  "item-types": "Your categories and packaging units, ready for every product.",
+  "daily-reports": "Daily sales, stock and team updates in one place.",
   sales: "From the vehicle to the shop. Every order accounted for.",
   customers:
     "Your shops, their balances, and the relationships that keep you moving.",
@@ -133,6 +138,7 @@ function NavMenu({ children }: any) {
 export default function Workspace() {
   const [s, setS] = useState<State | null>(null);
   const stateRef = useRef<State | null>(null);
+  const refreshVersion = useRef(0);
   const [page, setPage] = useState("dashboard");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -164,6 +170,7 @@ export default function Workspace() {
   }, []);
   const refresh = useCallback(
     async (silent = false) => {
+      const version = ++refreshVersion.current;
       if (!silent) setRefreshing(true);
       try {
         const r = await fetch("/api/state", {
@@ -171,6 +178,7 @@ export default function Workspace() {
           signal: AbortSignal.timeout(20000),
         });
         const data: any = await r.json();
+        if (version !== refreshVersion.current) return null;
         if (!r.ok) {
           setAuth(r.status === 401 || r.status === 403 ? r.status : 0);
           if (r.status === 401 || r.status === 403) {
@@ -190,8 +198,10 @@ export default function Workspace() {
         await updateQueue();
         return data;
       } catch (e: any) {
+        if (version !== refreshVersion.current) return null;
         if (!navigator.onLine) {
           const data = await readLocal("cache", "state");
+          if (version !== refreshVersion.current) return null;
           if (data) {
             stateRef.current = data;
             setS(data);
@@ -205,8 +215,10 @@ export default function Workspace() {
         setError(e.message || "Cannot reach the database. Please retry.");
         return null;
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (version === refreshVersion.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [updateQueue],
@@ -278,14 +290,19 @@ export default function Workspace() {
           .catch(() => {});
       }
     }
-    const timer = setInterval(() => {
+    const visibleRefresh = () => {
       if (navigator.onLine && document.visibilityState === "visible")
         void refresh(true);
-    }, 60000);
+    };
+    const timer = setInterval(visibleRefresh, 20000);
+    window.addEventListener("focus", visibleRefresh);
+    document.addEventListener("visibilitychange", visibleRefresh);
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
       clearInterval(timer);
+      window.removeEventListener("focus", visibleRefresh);
+      document.removeEventListener("visibilitychange", visibleRefresh);
     };
   }, [refresh, sync]);
   useEffect(() => {
@@ -451,6 +468,7 @@ export default function Workspace() {
   const props = workingState
     ? {
         s: workingState,
+        pendingCount: pending.length,
         go,
         open,
         detail: (kind: string, row: Row) => setDetails({ kind, row }),
@@ -667,6 +685,10 @@ export default function Workspace() {
                 <Dashboard {...props} />
               ) : activePage === "inventory" ? (
                 <Inventory {...props} />
+              ) : activePage === "item-types" ? (
+                <ItemTypes {...props} />
+              ) : activePage === "daily-reports" ? (
+                <DailyReports {...props} />
               ) : activePage === "reports" ? (
                 <Reports {...props} />
               ) : activePage === "notifications" ? (

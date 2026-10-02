@@ -24,23 +24,51 @@ CREATE INDEX IF NOT EXISTS movements_created_idx ON distribution.movements(creat
 CREATE INDEX IF NOT EXISTS activity_created_idx ON distribution.activity(created_at);
 CREATE OR REPLACE FUNCTION distribution.apply_action(action text,p jsonb,actor_id uuid,actor_role text,actor_key text,request_id uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
 #variable_conflict use_variable
-DECLARE v_id uuid; result jsonb; prev record; v record; prod record; cust record; item jsonb; lines jsonb:='[]'; qty integer; available integer; total_qty integer:=0; subtotal numeric:=0; discount numeric:=0; tax numeric:=0; total numeric:=0; paid numeric:=0; amount numeric; actual integer; diff integer:=0; note text:=coalesce(p->>'notes',''); day_now date:=(now() AT TIME ZONE 'Asia/Kolkata')::date; msg text; allowed boolean:=false; inv_no bigint;
+DECLARE v_id uuid; result jsonb; prev record; v record; prod record; cust record; item jsonb; lines jsonb:='[]'; qty integer; available integer; total_qty integer:=0; subtotal numeric:=0; discount numeric:=0; tax numeric:=0; total numeric:=0; paid numeric:=0; amount numeric; actual integer; diff integer:=0; note text:=coalesce(p->>'notes',''); day_now date:=(now() AT TIME ZONE 'Asia/Kolkata')::date; msg text; allowed boolean:=false; inv_no bigint; old_type record; selected_report_day date; snapshot jsonb; request_payload jsonb:=jsonb_build_object('action',action,'data',p);
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtext('sanket-distribution-write'));
  SELECT * INTO prev FROM distribution.requests WHERE id=request_id;
  IF FOUND THEN
-   IF prev.actor_key<>actor_key OR prev.payload<>jsonb_build_object('action',action,'data',p) THEN RAISE EXCEPTION 'Request identity conflict'; END IF;
+   IF prev.actor_key<>actor_key OR prev.payload<>request_payload THEN RAISE EXCEPTION 'Request identity conflict'; END IF;
    RETURN prev.result;
  END IF;
  allowed := actor_role='owner' OR
- (actor_role='warehouse_manager' AND action IN ('product','vehicle','load','start_day','inventory','vehicle_status','reconcile','mark_read')) OR
+ (actor_role='worker' AND action IN ('product','item_type','customer','route','vehicle','load','start_day','inventory','sale','payment','visit','vehicle_status','reconcile','submit_daily_report','mark_read')) OR
+ (actor_role='warehouse_manager' AND action IN ('product','item_type','vehicle','load','start_day','inventory','vehicle_status','reconcile','mark_read')) OR
  (actor_role='warehouse_staff' AND action IN ('load','start_day','inventory','vehicle_status','mark_read')) OR
  (actor_role='sales_manager' AND action IN ('customer','route','sale','payment','visit','vehicle_status','reconcile','mark_read')) OR
  (actor_role='salesman' AND action IN ('sale','payment','visit','vehicle_status','reconcile','mark_read')) OR
  (actor_role='accountant' AND action IN ('payment','mark_read'));
  IF NOT allowed THEN RAISE EXCEPTION 'Permission denied for this action'; END IF;
  IF actor_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=actor_id AND role=actor_role AND active) THEN RAISE EXCEPTION 'Session no longer authorized'; END IF;
- IF action='product' THEN
+ IF action='item_type' THEN
+  IF p->>'kind' NOT IN ('category','unit') OR length(trim(coalesce(p->>'name',''))) NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'Enter an item type name and choose category or unit'; END IF;
+  IF nullif(p->>'id','') IS NULL THEN
+   INSERT INTO distribution.item_types(kind,name,created_by) VALUES(p->>'kind',trim(p->>'name'),actor_id) RETURNING id INTO v_id;
+  ELSE
+   SELECT * INTO old_type FROM distribution.item_types WHERE id=(p->>'id')::uuid FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'Item type not found'; END IF;
+   IF old_type.kind<>p->>'kind' THEN RAISE EXCEPTION 'An item type cannot change between category and unit'; END IF;
+   UPDATE distribution.item_types SET name=trim(p->>'name') WHERE id=old_type.id RETURNING id INTO v_id;
+   IF old_type.kind='category' THEN UPDATE distribution.products SET category=trim(p->>'name') WHERE lower(trim(category))=lower(trim(old_type.name));
+   ELSE UPDATE distribution.products SET unit=trim(p->>'name') WHERE lower(trim(unit))=lower(trim(old_type.name)); END IF;
+  END IF; msg:='Item type saved: '||trim(p->>'name');
+ ELSIF action='submit_daily_report' THEN
+  IF actor_id IS NULL THEN RAISE EXCEPTION 'Sign in before submitting a daily report'; END IF;
+  selected_report_day:=(p->>'day')::date;
+  IF selected_report_day IS NULL OR selected_report_day>day_now THEN RAISE EXCEPTION 'Choose today or a previous day for the report'; END IF;
+  snapshot:=distribution.daily_summary(selected_report_day);
+  INSERT INTO distribution.daily_reports AS dr(report_day,submitted_by,summary,notes) VALUES(selected_report_day,actor_id,snapshot,note)
+   ON CONFLICT(report_day,submitted_by) DO UPDATE SET summary=excluded.summary,notes=excluded.notes,revision=dr.revision+1,submitted_at=now(),reviewed_at=NULL,reviewed_by=NULL RETURNING id INTO v_id;
+  msg:='Daily report submitted for '||selected_report_day;
+ ELSIF action='review_daily_report' THEN
+  IF actor_role<>'owner' OR actor_id IS NULL THEN RAISE EXCEPTION 'Only the owner can review reports'; END IF;
+  UPDATE distribution.daily_reports SET reviewed_by=actor_id,reviewed_at=now() WHERE id=(p->>'id')::uuid AND revision=(p->>'revision')::integer RETURNING id INTO v_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'This report changed. Refresh it before reviewing.'; END IF;
+  msg:='Daily report reviewed';
+ ELSIF action='product' THEN
+  p:=jsonb_set(p,'{category}',to_jsonb(distribution.ensure_item_type('category',p->>'category',actor_id)));
+  p:=jsonb_set(p,'{unit}',to_jsonb(distribution.ensure_item_type('unit',p->>'unit',actor_id)));
   IF length(trim(p->>'name'))<1 OR length(trim(p->>'sku'))<1 THEN RAISE EXCEPTION 'Product name and SKU are required'; END IF;
   IF nullif(p->>'id','') IS NULL THEN
    INSERT INTO distribution.products(sku,name,brand,category,unit,box_size,carton_size,price,cost,tax_rate,min_stock) VALUES(upper(trim(p->>'sku')),trim(p->>'name'),coalesce(p->>'brand',''),coalesce(p->>'category',''),coalesce(p->>'unit','Packet'),(p->>'box_size')::integer,(p->>'carton_size')::integer,(p->>'price')::numeric,(p->>'cost')::numeric,(p->>'tax_rate')::numeric,(p->>'min_stock')::integer) RETURNING id INTO v_id;
@@ -59,7 +87,7 @@ BEGIN
   INSERT INTO distribution.routes(id,name,area,notes) VALUES(coalesce(nullif(p->>'id','')::uuid,gen_random_uuid()),trim(p->>'name'),coalesce(p->>'area',''),note) ON CONFLICT(id) DO UPDATE SET name=excluded.name,area=excluded.area,notes=excluded.notes RETURNING id INTO v_id; msg:='Route saved: '||(p->>'name');
  ELSIF action='vehicle' THEN
   IF length(trim(p->>'number'))<3 THEN RAISE EXCEPTION 'A valid vehicle number is required'; END IF;
-  IF nullif(p->>'salesman_id','') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=(p->>'salesman_id')::uuid AND role='salesman' AND active) THEN RAISE EXCEPTION 'Select an active salesman'; END IF;
+  IF nullif(p->>'salesman_id','') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=(p->>'salesman_id')::uuid AND role IN ('salesman','worker') AND active) THEN RAISE EXCEPTION 'Select an active worker or sales representative'; END IF;
   IF nullif(p->>'id','') IS NOT NULL AND EXISTS(SELECT 1 FROM distribution.vehicles WHERE id=(p->>'id')::uuid AND status IN ('ON ROUTE','RETURNED','RECONCILIATION','LOADED')) THEN RAISE EXCEPTION 'Close the current vehicle day before changing assignments'; END IF;
   INSERT INTO distribution.vehicles(id,number,type,salesman_id,route_id) VALUES(coalesce(nullif(p->>'id','')::uuid,gen_random_uuid()),upper(trim(p->>'number')),p->>'type',nullif(p->>'salesman_id','')::uuid,nullif(p->>'route_id','')::uuid) ON CONFLICT(id) DO UPDATE SET number=excluded.number,type=excluded.type,salesman_id=excluded.salesman_id,route_id=excluded.route_id,updated_at=now() RETURNING id INTO v_id; msg:='Vehicle saved: '||(p->>'number');
  ELSIF action='user' THEN
@@ -81,7 +109,7 @@ BEGIN
   ELSIF p->>'kind'='RECEIPT' THEN
    UPDATE distribution.products SET warehouse_qty=warehouse_qty+qty WHERE id=v_id;
   ELSE RAISE EXCEPTION 'Select receipt or damage'; END IF;
-  INSERT INTO distribution.movements(product_id,kind,qty,notes) VALUES(v_id,p->>'kind',qty,note); msg:=initcap(p->>'kind')||' recorded for '||prod.name;
+  INSERT INTO distribution.movements(product_id,kind,qty,notes,created_by) VALUES(v_id,p->>'kind',qty,note,actor_id); msg:=initcap(p->>'kind')||' recorded for '||prod.name;
  ELSIF action IN ('load','start_day','sale','vehicle_status','reconcile') THEN
   SELECT * INTO v FROM distribution.vehicles WHERE id=(p->>'vehicle_id')::uuid FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Vehicle not found'; END IF;
@@ -94,7 +122,7 @@ BEGIN
   ELSIF action='load' THEN
    IF v.status IN ('MAINTENANCE','ON ROUTE','RETURNED','RECONCILIATION') OR (v.status='CLOSED' AND v.active_day=day_now) THEN RAISE EXCEPTION 'This vehicle is not available for loading'; END IF;
    IF v.active_day<day_now AND v.status<>'CLOSED' THEN RAISE EXCEPTION 'Reconcile the previous vehicle day before loading'; END IF;
-   IF v.salesman_id IS NULL OR NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=v.salesman_id AND role='salesman' AND active) THEN RAISE EXCEPTION 'Assign an active salesman before loading'; END IF;
+   IF v.salesman_id IS NULL OR NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=v.salesman_id AND role IN ('salesman','worker') AND active) THEN RAISE EXCEPTION 'Assign an active worker or sales representative before loading'; END IF;
    INSERT INTO distribution.vehicle_days(vehicle_id,day,opening) SELECT v.id,day_now,coalesce(jsonb_agg(jsonb_build_object('product_id',vs.product_id,'qty',vs.qty)),'[]') FROM distribution.vehicle_stock vs WHERE vs.vehicle_id=v.id ON CONFLICT DO NOTHING;
    IF jsonb_typeof(p->'items')<>'array' OR jsonb_array_length(p->'items')=0 THEN RAISE EXCEPTION 'Add at least one product'; END IF;
    v_id:=gen_random_uuid();
@@ -105,7 +133,7 @@ BEGIN
     IF qty<=0 OR prod.warehouse_qty<qty THEN RAISE EXCEPTION 'Insufficient warehouse stock for %',prod.name; END IF;
     UPDATE distribution.products SET warehouse_qty=warehouse_qty-qty WHERE id=prod.id;
     INSERT INTO distribution.vehicle_stock(vehicle_id,product_id,qty) VALUES(v.id,prod.id,qty) ON CONFLICT(vehicle_id,product_id) DO UPDATE SET qty=distribution.vehicle_stock.qty+excluded.qty;
-    INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id) VALUES(prod.id,v.id,'LOAD',qty,v_id);
+    INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id,created_by) VALUES(prod.id,v.id,'LOAD',qty,v_id,actor_id);
     total_qty:=total_qty+qty; lines:=lines||jsonb_build_array(jsonb_build_object('product_id',prod.id,'name',prod.name,'qty',qty,'unit',prod.unit));
    END LOOP;
    INSERT INTO distribution.loads(id,vehicle_id,salesman_id,items,qty,created_by) VALUES(v_id,v.id,v.salesman_id,lines,total_qty,actor_id);
@@ -128,7 +156,7 @@ BEGIN
     amount:=round(prod.price*qty,2); subtotal:=subtotal+amount;
     lines:=lines||jsonb_build_array(jsonb_build_object('product_id',prod.id,'name',prod.name,'qty',qty,'unit',prod.unit,'price',prod.price,'tax_rate',prod.tax_rate,'subtotal',amount));
     UPDATE distribution.vehicle_stock SET qty=vehicle_stock.qty-qty WHERE vehicle_id=v.id AND product_id=prod.id;
-    INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id) VALUES(prod.id,v.id,'SALE',qty,v_id);
+    INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id,created_by) VALUES(prod.id,v.id,'SALE',qty,v_id,actor_id);
    END LOOP;
    discount:=coalesce((p->>'discount')::numeric,0);
    IF discount<0 OR discount>subtotal THEN RAISE EXCEPTION 'Discount must be between zero and subtotal'; END IF;
@@ -150,13 +178,13 @@ BEGIN
    FOR prod IN SELECT s.*,p2.name,p2.unit FROM distribution.vehicle_stock s JOIN distribution.products p2 ON p2.id=s.product_id WHERE s.vehicle_id=v.id AND s.qty>0 FOR UPDATE OF s LOOP
     SELECT (x->>'physical')::integer INTO actual FROM jsonb_array_elements(p->'items') x WHERE (x->>'product_id')::uuid=prod.product_id;
     IF actual IS NULL OR actual<0 OR actual>prod.qty THEN RAISE EXCEPTION 'Physical count must be between zero and expected stock for %',prod.name; END IF;
-    IF actual<>prod.qty AND (actor_role NOT IN ('owner','warehouse_manager') OR length(trim(note))<3) THEN RAISE EXCEPTION 'A manager must record a reason for stock discrepancies'; END IF;
+    IF actual<>prod.qty AND (actor_role NOT IN ('owner','warehouse_manager','worker') OR length(trim(note))<3) THEN RAISE EXCEPTION 'A manager must record a reason for stock discrepancies'; END IF;
     diff:=diff+prod.qty-actual;
-    IF actual<prod.qty THEN INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id,notes) VALUES(prod.product_id,v.id,'LOSS',prod.qty-actual,v_id,note); END IF;
+    IF actual<prod.qty THEN INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id,notes,created_by) VALUES(prod.product_id,v.id,'LOSS',prod.qty-actual,v_id,note,actor_id); END IF;
     IF p->>'decision'='UNLOAD' THEN
      UPDATE distribution.products SET warehouse_qty=warehouse_qty+actual WHERE id=prod.product_id;
      UPDATE distribution.vehicle_stock SET qty=0 WHERE vehicle_id=v.id AND product_id=prod.product_id;
-     IF actual>0 THEN INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id) VALUES(prod.product_id,v.id,'UNLOAD',actual,v_id); END IF;
+     IF actual>0 THEN INSERT INTO distribution.movements(product_id,vehicle_id,kind,qty,reference_id,created_by) VALUES(prod.product_id,v.id,'UNLOAD',actual,v_id,actor_id); END IF;
     ELSE UPDATE distribution.vehicle_stock SET qty=actual WHERE vehicle_id=v.id AND product_id=prod.product_id; END IF;
     total_qty:=total_qty+actual; lines:=lines||jsonb_build_array(jsonb_build_object('product_id',prod.product_id,'name',prod.name,'expected',prod.qty,'physical',actual));
    END LOOP;
@@ -183,7 +211,7 @@ BEGIN
  IF action NOT IN ('settings','mark_read') AND v_id IS NULL THEN RAISE EXCEPTION 'Record not found'; END IF;
  IF action<>'mark_read' THEN INSERT INTO distribution.activity(action,message,entity_id,created_by) VALUES(action,msg,v_id,actor_id); END IF;
  result:=jsonb_build_object('id',v_id,'message',msg);
- INSERT INTO distribution.requests(id,actor_key,payload,result) VALUES(request_id,actor_key,jsonb_build_object('action',action,'data',p),result);
+ INSERT INTO distribution.requests(id,actor_key,payload,result) VALUES(request_id,actor_key,request_payload,result);
  RETURN result;
 END $$;
 CREATE OR REPLACE FUNCTION distribution.resolve_member(member_email text,member_name text) RETURNS jsonb LANGUAGE plpgsql AS $$

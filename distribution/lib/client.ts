@@ -16,6 +16,8 @@ export type State = {
   visits: Row[];
   activity: Row[];
   users: Row[];
+  itemTypes: Row[];
+  dailyReports: Row[];
   reads: Row[];
   serverTime: string;
 };
@@ -51,6 +53,7 @@ export const sum = (rows: Row[], key: string) =>
   rows.reduce((n, r) => n + Number(r[key] || 0), 0);
 export const roleNames: Record<string, string> = {
   owner: "Business owner",
+  worker: "Worker",
   warehouse_manager: "Warehouse manager",
   warehouse_staff: "Warehouse staff",
   sales_manager: "Sales manager",
@@ -59,9 +62,27 @@ export const roleNames: Record<string, string> = {
 };
 export const permissions: Record<string, string[]> = {
   owner: ["*"],
+  worker: [
+    "dashboard",
+    "sales",
+    "customers",
+    "products",
+    "item-types",
+    "inventory",
+    "vehicles",
+    "loads",
+    "payments",
+    "routes",
+    "reports",
+    "daily-reports",
+    "reconciliation",
+    "notifications",
+    "sync",
+  ],
   warehouse_manager: [
     "dashboard",
     "products",
+    "item-types",
     "inventory",
     "vehicles",
     "loads",
@@ -116,8 +137,26 @@ export const permissions: Record<string, string[]> = {
 };
 export const actions: Record<string, string[]> = {
   owner: ["*"],
+  worker: [
+    "product",
+    "item_type",
+    "customer",
+    "route",
+    "vehicle",
+    "inventory",
+    "load",
+    "start_day",
+    "sale",
+    "payment",
+    "visit",
+    "vehicle_status",
+    "reconcile",
+    "submit_daily_report",
+    "mark_read",
+  ],
   warehouse_manager: [
     "product",
+    "item_type",
     "vehicle",
     "load",
     "start_day",
@@ -220,6 +259,9 @@ export function notifications(s: State) {
             vehicle: "vehicles",
             product: "products",
             inventory: "inventory",
+            item_type: "item-types",
+            submit_daily_report: "daily-reports",
+            review_daily_report: "daily-reports",
             route: "routes",
             user: "settings",
           } as any

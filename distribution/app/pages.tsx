@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { InviteButton } from "./access";
+import { WorkerDashboard, AdminDailyPanel } from "./operations";
 import {
   AreaChart,
   Area,
@@ -75,13 +76,21 @@ import {
   type Row,
 } from "@/lib/client";
 export type PageProps = {
+  pendingCount?: number;
   s: State;
   go: (p: string) => void;
   open: (kind: string, initial?: Row) => void;
   detail: (kind: string, row: Row) => void;
   save: (action: string, data: Row) => Promise<any>;
 };
-export function Dashboard({ s, go, open, detail, save }: PageProps) {
+export function Dashboard({
+  s,
+  go,
+  open,
+  detail,
+  save,
+  pendingCount,
+}: PageProps) {
   const [range, setRange] = useState("week");
   const today = day();
   const todays = s.sales.filter((x) => day(x.created_at) === today);
@@ -133,6 +142,17 @@ export function Dashboard({ s, go, open, detail, save }: PageProps) {
     },
   ].filter((x) => can(s.user.role, x.action));
   const needsSetup = progress.some((p) => !p.done);
+  if (s.user.role === "worker")
+    return (
+      <WorkerDashboard
+        s={s}
+        go={go}
+        open={open}
+        detail={detail}
+        save={save}
+        pendingCount={pendingCount}
+      />
+    );
   if (salesman)
     return (
       <div className="stack">
@@ -327,6 +347,7 @@ export function Dashboard({ s, go, open, detail, save }: PageProps) {
           </>
         )}
       </div>
+      {s.user.role === "owner" && <AdminDailyPanel s={s} go={go} />}
       {needsSetup && (
         <div className="onboarding">
           <div className="flex-row">
@@ -1547,6 +1568,11 @@ export function Inventory({ s, open, detail }: PageProps) {
                 },
                 { key: "vehicle_number", label: "Vehicle" },
                 { key: "qty", label: "Base units" },
+                {
+                  key: "recorded_by",
+                  label: "Recorded by",
+                  render: (r) => r.recorded_by || "Not recorded",
+                },
                 { key: "notes", label: "Reference / reason" },
               ]}
               empty="No stock movements yet"
@@ -2343,7 +2369,10 @@ export function SettingsPage({ s, open }: PageProps) {
         <div className="panel-head">
           <div>
             <h2>Team & access</h2>
-            <p>Each role sees the tools they need for their work</p>
+            <p>
+              Workers manage warehouse stock, every vehicle and sales. Only the
+              owner manages team access and reviews daily reports.
+            </p>
           </div>
           <Btn onClick={() => open("user")}>
             <Plus size={14} />

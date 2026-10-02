@@ -4,6 +4,7 @@ const base = process.env.TEST_APP_URL || "http://127.0.0.1:5173";
 for (const [name, path, options, expected] of [
   ["health", "/api/health", {}, 200],
   ["unauthenticated state", "/api/state", {}, 401],
+  ["unauthenticated daily report", "/api/daily-report?day=2026-10-02", {}, 401],
   [
     "forged identity headers",
     "/api/state",

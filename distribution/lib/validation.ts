@@ -20,6 +20,24 @@ const items = z
   .min(1)
   .max(500);
 const schemas: Record<string, z.ZodTypeAny> = {
+  item_type: z.object({
+    id: optionalId,
+    name,
+    kind: z.enum(["category", "unit"]),
+  }),
+  submit_daily_report: z.object({
+    day: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .refine(
+        (value) =>
+          Number.isFinite(Date.parse(value)) &&
+          new Date(value).toISOString().slice(0, 10) === value,
+        "Choose a valid report date",
+      ),
+    notes: text.default(""),
+  }),
+  review_daily_report: z.object({ id: uuid, revision: positive }),
   product: z.object({
     id: optionalId,
     name,
@@ -62,6 +80,7 @@ const schemas: Record<string, z.ZodTypeAny> = {
     name,
     email: z.string().trim().email().max(254),
     role: z.enum([
+      "worker",
       "warehouse_manager",
       "warehouse_staff",
       "sales_manager",
