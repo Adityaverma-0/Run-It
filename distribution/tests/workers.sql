@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION distribution.worker_action(a text,p jsonb,u uuid,request uuid DEFAULT gen_random_uuid()) RETURNS jsonb LANGUAGE sql AS $$ SELECT distribution.apply_action(a,p,u,'worker',u::text,request) $$;
 DO $$
 #variable_conflict use_variable
-DECLARE owner_id uuid; worker_id uuid; other_worker uuid; product_id uuid; category_id uuid; unit_id uuid; vehicle_id uuid; customer_id uuid; route_id uuid; report_id uuid; request_id uuid; payload jsonb; result jsonb; snapshot jsonb; stockrow jsonb; person jsonb; today date:=(now() AT TIME ZONE 'Asia/Kolkata')::date;
+DECLARE owner_id uuid; worker_id uuid; other_worker uuid; product_id uuid; category_id uuid; unit_id uuid; vehicle_id uuid; customer_id uuid; report_id uuid; request_id uuid; payload jsonb; result jsonb; snapshot jsonb; stockrow jsonb; person jsonb; today date:=(now() AT TIME ZONE 'Asia/Kolkata')::date;
 BEGIN
  SELECT id INTO owner_id FROM distribution.users WHERE email='owner@example.invalid';
  result:=distribution.apply_action('user','{"name":"Isolated worker","email":"worker@example.invalid","role":"worker","active":true}',owner_id,'owner',owner_id::text,gen_random_uuid()); worker_id:=(result->>'id')::uuid;
@@ -20,14 +20,12 @@ BEGIN
  PERFORM distribution.worker_action('item_type',jsonb_build_object('id',category_id,'kind','category','name','Renamed worker category'),worker_id);
  PERFORM distribution.check_true((SELECT category='Renamed worker category' FROM distribution.products WHERE id=product_id),'Renaming a category updates linked products');
  PERFORM distribution.auth_expect_error(format('SELECT distribution.worker_action(%L,%L,%L)','item_type',jsonb_build_object('id',unit_id,'kind','category','name','Wrong kind')::text,worker_id),'cannot change');
- result:=distribution.worker_action('route','{"name":"Worker route","area":""}',worker_id);route_id:=(result->>'id')::uuid;
- result:=distribution.worker_action('customer',jsonb_build_object('name','Worker shop','credit_limit',0,'route_id',route_id),worker_id);customer_id:=(result->>'id')::uuid;
- result:=distribution.worker_action('vehicle',jsonb_build_object('number','WORKER-VEHICLE','type','Van','salesman_id',other_worker,'route_id',route_id),worker_id);vehicle_id:=(result->>'id')::uuid;
+ result:=distribution.worker_action('vehicle',jsonb_build_object('number','WORKER-VEHICLE','type','Van','salesman_id',other_worker),worker_id);vehicle_id:=(result->>'id')::uuid;
  PERFORM distribution.worker_action('inventory',jsonb_build_object('product_id',product_id,'qty',100,'kind','RECEIPT'),worker_id);
  PERFORM distribution.worker_action('load',jsonb_build_object('vehicle_id',vehicle_id,'items',jsonb_build_array(jsonb_build_object('product_id',product_id,'qty',40))),worker_id);
  PERFORM distribution.check_true((SELECT warehouse_qty=60 FROM distribution.products WHERE id=product_id),'Workers can load a vehicle assigned to another worker');
  PERFORM distribution.worker_action('vehicle_status',jsonb_build_object('vehicle_id',vehicle_id,'status','ON ROUTE'),worker_id);
- PERFORM distribution.worker_action('sale',jsonb_build_object('vehicle_id',vehicle_id,'customer_id',customer_id,'items',jsonb_build_array(jsonb_build_object('product_id',product_id,'qty',5)),'discount',0,'method','CASH','paid',50),worker_id);
+ PERFORM distribution.worker_action('sale',jsonb_build_object('vehicle_id',vehicle_id,'buyer',jsonb_build_object('name','Worker shop'),'items',jsonb_build_array(jsonb_build_object('product_id',product_id,'qty',5)),'discount',0,'method','CASH','paid',50),worker_id);
  PERFORM distribution.worker_action('inventory',jsonb_build_object('product_id',product_id,'qty',3,'kind','DAMAGE','notes','Isolated damaged packaging'),worker_id);
  PERFORM distribution.worker_action('reconcile',jsonb_build_object('vehicle_id',vehicle_id,'decision','UNLOAD','items',jsonb_build_array(jsonb_build_object('product_id',product_id,'physical',35))),worker_id);
  PERFORM distribution.check_true((SELECT warehouse_qty=92 FROM distribution.products WHERE id=product_id),'Worker stock, sale and unload update the shared warehouse balance');

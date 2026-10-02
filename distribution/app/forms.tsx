@@ -58,16 +58,7 @@ const defaults: Record<string, Row> = {
     min_stock: 0,
     active: true,
   },
-  customer: {
-    name: "",
-    owner_name: "",
-    phone: "",
-    address: "",
-    route_id: "",
-    credit_limit: 0,
-  },
-  vehicle: { number: "", type: "Delivery van", salesman_id: "", route_id: "" },
-  route: { name: "", area: "", notes: "" },
+  vehicle: { number: "", type: "Delivery van", salesman_id: "" },
   user: { name: "", email: "", role: "salesman", active: true },
   inventory: { product_id: "", qty: "", kind: "RECEIPT", notes: "" },
   payment: { customer_id: "", amount: "", method: "CASH", reference: "" },
@@ -136,9 +127,7 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
   const titles: Record<string, string> = {
     item_type: "item type",
     product: "product",
-    customer: "customer",
     vehicle: "vehicle",
-    route: "route",
     user: "team member",
     inventory: "stock movement",
     payment: "payment",
@@ -267,25 +256,6 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
               </p>
             </>
           )}
-          {kind === "customer" && (
-            <>
-              {input("name", "Shop name", "text", { required: true })}
-              {input("owner_name", "Owner name")}
-              {input("phone", "Phone number", "tel", {
-                pattern: "[+0-9 ()-]{7,20}",
-              })}
-              {pick("route_id", "Route", options("routes"), "Unassigned")}
-              {input("address", "Address")}
-              {input("credit_limit", "Credit limit (₹)", "number", {
-                min: 0,
-                step: ".01",
-                required: true,
-              })}
-              <p className="form-help full">
-                A zero credit limit requires full payment when a sale is made.
-              </p>
-            </>
-          )}
           {kind === "vehicle" && (
             <>
               {input("number", "Vehicle number", "text", { required: true })}
@@ -306,23 +276,10 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
                   .map((u) => ({ value: u.id, label: u.name })),
                 "Unassigned",
               )}
-              {pick(
-                "route_id",
-                "Assigned route",
-                options("routes"),
-                "Unassigned",
-              )}
               <p className="form-help full">
                 The admin can add worker or sales accounts in Settings before
                 assigning them to a vehicle.
               </p>
-            </>
-          )}
-          {kind === "route" && (
-            <>
-              {input("name", "Route name", "text", { required: true })}
-              {input("area", "Area")}
-              <div className="full">{input("notes", "Route notes")}</div>
             </>
           )}
           {kind === "user" && (
@@ -377,7 +334,22 @@ export default function RecordForm({ s, kind, initial, close, save }: Props) {
           )}
           {kind === "payment" && (
             <>
-              {pick("customer_id", "Customer", options("customers"))}
+              {pick(
+                "customer_id",
+                "Buyer",
+                s.customers
+                  .filter((c) => Number(c.balance) > 0)
+                  .map((c) => ({
+                    value: c.id,
+                    label: `${c.name} · ${money(c.balance)} outstanding`,
+                  })),
+              )}
+              {!s.customers.some((c) => Number(c.balance) > 0) && (
+                <p className="form-help full">
+                  No outstanding balances to collect. Buyer balances are created
+                  by confirmed credit sales.
+                </p>
+              )}
               {input("amount", "Amount received (₹)", "number", {
                 min: ".01",
                 max: customer?.balance,
@@ -450,6 +422,16 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
       "",
   );
   const [customerId, setCustomer] = useState(initial?.customer_id || "");
+  const [newBuyer, setNewBuyer] = useState(
+    !initial?.customer_id && !s.customers.length,
+  );
+  const [buyer, setBuyer] = useState({ name: "", phone: "", address: "" });
+  const [changeCredit, setChangeCredit] = useState(false);
+  const [creditLimit, setCreditLimit] = useState("");
+  const [buyerSalesman, setBuyerSalesman] = useState("");
+  const manageBuyerTerms = ["owner", "worker", "sales_manager"].includes(
+    s.user.role,
+  );
   const [items, setItems] = useState<Row[]>([]);
   const [query, setQuery] = useState("");
   const [method, setMethod] = useState("CASH");
@@ -459,7 +441,19 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const v = s.vehicles.find((v) => v.id === vehicleId);
-  const c = s.customers.find((c) => c.id === customerId);
+  const c = newBuyer ? undefined : s.customers.find((c) => c.id === customerId);
+  const buyerName = newBuyer ? buyer.name.trim() : c?.name;
+  const effectiveCredit = changeCredit
+    ? Number(creditLimit)
+    : Number(c?.credit_limit || 0);
+  const creditValid =
+    !changeCredit ||
+    (creditLimit !== "" &&
+      Number.isFinite(effectiveCredit) &&
+      effectiveCredit >= 0 &&
+      Math.abs(effectiveCredit * 100 - Math.round(effectiveCredit * 100)) <
+        0.0001);
+  const buyerValid = newBuyer ? buyer.name.trim().length > 0 : Boolean(c);
   const subtotal = items.reduce(
     (n, i) =>
       n +
@@ -498,7 +492,7 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
   );
   const steps = loading
     ? ["Vehicle & opening", "Add products", "Review & confirm"]
-    : ["Customer & vehicle", "Add products", "Payment & confirm"];
+    : ["Buyer & vehicle", "Add products", "Payment & confirm"];
   const update = (id: string, qty: number) =>
     setItems((rows) =>
       rows.map((i) => (i.product_id === id ? { ...i, qty } : i)),
@@ -509,7 +503,13 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
     try {
       await save(loading ? "load" : "sale", {
         vehicle_id: vehicleId,
-        customer_id: customerId,
+        ...(!loading && (newBuyer ? { buyer } : { customer_id: customerId })),
+        ...(!loading && manageBuyerTerms && changeCredit
+          ? { buyer_credit_limit: effectiveCredit }
+          : {}),
+        ...(!loading && manageBuyerTerms && buyerSalesman
+          ? { buyer_salesman_id: buyerSalesman }
+          : {}),
         items,
         discount,
         paid: paidValue,
@@ -530,11 +530,11 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
       onClose={() => {
         if (!busy) close();
       }}
-      title={loading ? "Morning vehicle load" : "New customer sale"}
+      title={loading ? "Morning vehicle load" : "New sale"}
       description={
         loading
           ? "Move warehouse stock into a vehicle, with opening stock carried forward."
-          : "Choose a shop, add products and record the payment."
+          : "Choose or enter the buyer, add products and record the payment."
       }
     >
       <div className="stepper">
@@ -552,17 +552,143 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
         <div className="stack">
           <div className="form-grid">
             {!loading && (
-              <Field label="Customer">
-                <Pick
-                  label="Customer"
-                  value={customerId}
-                  onChange={setCustomer}
-                  options={s.customers.map((c) => ({
-                    value: c.id,
-                    label: c.name,
-                  }))}
-                />
-              </Field>
+              <div className="full stack">
+                <div className="view-switch" aria-label="Buyer entry">
+                  <button
+                    type="button"
+                    className={!newBuyer ? "active" : ""}
+                    onClick={() => {
+                      setNewBuyer(false);
+                      setChangeCredit(false);
+                      setBuyerSalesman("");
+                    }}
+                  >
+                    Existing buyer
+                  </button>
+                  <button
+                    type="button"
+                    className={newBuyer ? "active" : ""}
+                    onClick={() => {
+                      setNewBuyer(true);
+                      setChangeCredit(false);
+                      setBuyerSalesman("");
+                    }}
+                  >
+                    New buyer
+                  </button>
+                </div>
+                {newBuyer ? (
+                  <div className="form-grid">
+                    <Field
+                      label="Buyer name"
+                      value={buyer.name}
+                      maxLength={500}
+                      required
+                      onChange={(e: any) =>
+                        setBuyer({ ...buyer, name: e.target.value })
+                      }
+                    />
+                    <Field
+                      label="Buyer phone (optional)"
+                      value={buyer.phone}
+                      maxLength={500}
+                      type="tel"
+                      onChange={(e: any) =>
+                        setBuyer({ ...buyer, phone: e.target.value })
+                      }
+                    />
+                    <Field
+                      label="Buyer address (optional)"
+                      value={buyer.address}
+                      maxLength={500}
+                      onChange={(e: any) =>
+                        setBuyer({ ...buyer, address: e.target.value })
+                      }
+                    />
+                    <p className="form-help full">
+                      The buyer is saved together with this sale. Choose an
+                      existing buyer for repeat purchases so their balance stays
+                      together. A new buyer becomes selectable after
+                      synchronization.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <Field label="Buyer">
+                      <Pick
+                        label="Buyer"
+                        value={customerId}
+                        onChange={(id: string) => {
+                          setCustomer(id);
+                          setChangeCredit(false);
+                          setBuyerSalesman("");
+                        }}
+                        options={s.customers.map((c) => ({
+                          value: c.id,
+                          label: c.phone ? `${c.name} · ${c.phone}` : c.name,
+                        }))}
+                      />
+                    </Field>
+                    {!s.customers.length && (
+                      <p className="form-help">
+                        No buyers available. Choose New buyer to enter the
+                        actual buyer for this sale.
+                      </p>
+                    )}
+                  </>
+                )}
+                {manageBuyerTerms && (
+                  <details>
+                    <summary className="text-link">
+                      Credit & representative access (optional)
+                    </summary>
+                    <div className="stack mt-3">
+                      <label className="flex-row">
+                        <Checkbox
+                          checked={changeCredit}
+                          onCheckedChange={(checked) => {
+                            setChangeCredit(checked === true);
+                            setCreditLimit(String(c?.credit_limit || 0));
+                          }}
+                        />
+                        Set buyer credit limit with this sale
+                      </label>
+                      {changeCredit && (
+                        <Field
+                          label="Buyer credit limit (₹)"
+                          type="number"
+                          min="0"
+                          step=".01"
+                          value={creditLimit}
+                          onChange={(e: any) => setCreditLimit(e.target.value)}
+                        />
+                      )}
+                      <Field label="Allow representative to sell and collect">
+                        <Pick
+                          label="Allow representative to sell and collect"
+                          value={buyerSalesman}
+                          onChange={setBuyerSalesman}
+                          options={s.users
+                            .filter((u) => u.active && u.role === "salesman")
+                            .map((u) => ({ value: u.id, label: u.name }))}
+                          placeholder="Do not change buyer access"
+                        />
+                      </Field>
+                      <p className="form-help">
+                        Credit and access changes apply only when the sale
+                        succeeds. A selected representative can see this buyer's
+                        balance and payment history. Other representatives keep
+                        their existing access.
+                      </p>
+                    </div>
+                  </details>
+                )}
+                <p className="form-help">
+                  A zero credit limit requires full payment. Existing limits
+                  remain unchanged unless an authorized team member explicitly
+                  sets a new limit.
+                </p>
+              </div>
             )}
             <Field label="Vehicle">
               <Pick
@@ -580,7 +706,7 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
                   )
                   .map((v) => ({
                     value: v.id,
-                    label: `${v.number} · ${v.status}`,
+                    label: `${v.number} · ${v.status === "ON ROUTE" ? "Dispatched" : v.status}`,
                   }))}
               />
             </Field>
@@ -592,8 +718,7 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
                 <Badge>{v.status}</Badge>
               </div>
               <p className="muted small">
-                {v.salesman_name || "No salesman assigned"} ·{" "}
-                {v.route_name || "No route assigned"}
+                {v.salesman_name || "No worker or salesperson assigned"}
               </p>
               {loading ? (
                 <div className="flow-summary">
@@ -622,10 +747,10 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
           {c && !loading && (
             <div className="alert">
               Outstanding {money(c.balance)} · Credit limit{" "}
-              {money(c.credit_limit)}
+              {money(effectiveCredit)}
             </div>
           )}
-          {(!s.vehicles.length || (!loading && !s.customers.length)) && (
+          {!s.vehicles.length && (
             <Empty
               icon={loading ? Truck : Warehouse}
               title={
@@ -635,8 +760,8 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
               }
               description={
                 loading
-                  ? "Add a vehicle and assign a salesman in Vehicles."
-                  : "Add a customer, load a vehicle and dispatch it to its route first."
+                  ? "Add a vehicle and assign a worker or salesperson in Vehicles."
+                  : "Load a vehicle and dispatch it before recording a sale."
               }
             />
           )}
@@ -745,7 +870,7 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
         <div className="stack">
           <div className="alert">
             <Truck size={17} />
-            {v?.number} · {loading ? v?.salesman_name : c?.name}
+            {v?.number} · {loading ? v?.salesman_name : buyerName}
           </div>
           <div>
             {items.map((i) => {
@@ -824,10 +949,10 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
                   <span>{money(total - paidValue)}</span>
                 </div>
               </div>
-              {Number(c?.balance) + total - paidValue >
-                Number(c?.credit_limit) && (
+              {Number(c?.balance || 0) + total - paidValue >
+                effectiveCredit && (
                 <div className="alert error">
-                  This sale exceeds the customer's credit limit.
+                  This sale exceeds the buyer's credit limit.
                 </div>
               )}
             </>
@@ -873,7 +998,7 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
             disabled={
               step === 0
                 ? !vehicleId ||
-                  (!loading && !customerId) ||
+                  (!loading && (!buyerValid || !creditValid)) ||
                   (loading && !v?.salesman_id)
                 : !items.length || invalid
             }
@@ -887,12 +1012,14 @@ export function TransactionForm({ s, kind, initial, close, save }: Props) {
               invalid ||
               !items.length ||
               (!loading &&
-                (discount < 0 ||
+                (!buyerValid ||
+                  !creditValid ||
+                  discount < 0 ||
                   discount > subtotal ||
                   paidValue < 0 ||
                   paidValue > total ||
-                  Number(c?.balance) + total - paidValue >
-                    Number(c?.credit_limit)))
+                  Number(c?.balance || 0) + total - paidValue >
+                    effectiveCredit))
             }
             onClick={submit}
           >

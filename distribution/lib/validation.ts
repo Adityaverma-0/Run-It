@@ -53,27 +53,11 @@ const schemas: Record<string, z.ZodTypeAny> = {
     min_stock: integer,
     active: z.boolean().default(true),
   }),
-  customer: z.object({
-    id: optionalId,
-    name,
-    owner_name: text.default(""),
-    phone: text.default(""),
-    address: text.default(""),
-    route_id: optionalId,
-    credit_limit: amount,
-  }),
-  route: z.object({
-    id: optionalId,
-    name,
-    area: text.default(""),
-    notes: text.default(""),
-  }),
   vehicle: z.object({
     id: optionalId,
     number: name.min(3),
     type: name,
     salesman_id: optionalId,
-    route_id: optionalId,
   }),
   user: z.object({
     id: optionalId,
@@ -114,23 +98,32 @@ const schemas: Record<string, z.ZodTypeAny> = {
       "AVAILABLE",
     ]),
   }),
-  sale: z.object({
-    vehicle_id: uuid,
-    customer_id: uuid,
-    items,
-    discount: amount,
-    paid: amount,
-    method: z.enum(["CASH", "UPI", "BANK TRANSFER", "CREDIT"]),
-    reference: text.default(""),
-    notes: text.default(""),
-  }),
+  sale: z
+    .object({
+      vehicle_id: uuid,
+      customer_id: optionalId,
+      buyer: z
+        .object({ name, phone: text.default(""), address: text.default("") })
+        .optional(),
+      buyer_credit_limit: amount.optional(),
+      buyer_salesman_id: uuid.optional(),
+      items,
+      discount: amount,
+      paid: amount,
+      method: z.enum(["CASH", "UPI", "BANK TRANSFER", "CREDIT"]),
+      reference: text.default(""),
+      notes: text.default(""),
+    })
+    .refine(
+      (p) => Boolean(p.customer_id) !== Boolean(p.buyer),
+      "Choose an existing buyer or enter a new buyer",
+    ),
   payment: z.object({
     customer_id: uuid,
     amount: amount.refine((n) => n > 0),
     method,
     reference: text.default(""),
   }),
-  visit: z.object({ customer_id: uuid }),
   reconcile: z.object({
     vehicle_id: uuid,
     decision: z.enum(["HOLD", "UNLOAD"]),

@@ -74,7 +74,7 @@ export function AccessScreen({
         <h1>
           Every box.
           <br />
-          Every route.
+          Every sale.
           <br />
           One clear picture.
         </h1>

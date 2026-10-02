@@ -33,11 +33,11 @@ BEGIN
    RETURN prev.result;
  END IF;
  allowed := actor_role='owner' OR
- (actor_role='worker' AND action IN ('product','item_type','customer','route','vehicle','load','start_day','inventory','sale','payment','visit','vehicle_status','reconcile','submit_daily_report','mark_read')) OR
+ (actor_role='worker' AND action IN ('product','item_type','vehicle','load','start_day','inventory','sale','payment','vehicle_status','reconcile','submit_daily_report','mark_read')) OR
  (actor_role='warehouse_manager' AND action IN ('product','item_type','vehicle','load','start_day','inventory','vehicle_status','reconcile','mark_read')) OR
  (actor_role='warehouse_staff' AND action IN ('load','start_day','inventory','vehicle_status','mark_read')) OR
- (actor_role='sales_manager' AND action IN ('customer','route','sale','payment','visit','vehicle_status','reconcile','mark_read')) OR
- (actor_role='salesman' AND action IN ('sale','payment','visit','vehicle_status','reconcile','mark_read')) OR
+ (actor_role='sales_manager' AND action IN ('sale','payment','vehicle_status','reconcile','mark_read')) OR
+ (actor_role='salesman' AND action IN ('sale','payment','vehicle_status','reconcile','mark_read')) OR
  (actor_role='accountant' AND action IN ('payment','mark_read'));
  IF NOT allowed THEN RAISE EXCEPTION 'Permission denied for this action'; END IF;
  IF actor_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=actor_id AND role=actor_role AND active) THEN RAISE EXCEPTION 'Session no longer authorized'; END IF;
@@ -75,21 +75,11 @@ BEGIN
   ELSE
    UPDATE distribution.products SET sku=upper(trim(p->>'sku')),name=trim(p->>'name'),brand=p->>'brand',category=p->>'category',unit=p->>'unit',box_size=(p->>'box_size')::integer,carton_size=(p->>'carton_size')::integer,price=(p->>'price')::numeric,cost=(p->>'cost')::numeric,tax_rate=(p->>'tax_rate')::numeric,min_stock=(p->>'min_stock')::integer,active=coalesce((p->>'active')::boolean,true) WHERE id=(p->>'id')::uuid RETURNING id INTO v_id;
   END IF; msg:='Product saved: '||(p->>'name');
- ELSIF action='customer' THEN
-  IF length(trim(p->>'name'))<1 THEN RAISE EXCEPTION 'Shop name is required'; END IF;
-  IF nullif(p->>'id','') IS NULL THEN
-   INSERT INTO distribution.customers(name,owner_name,phone,address,route_id,credit_limit) VALUES(trim(p->>'name'),coalesce(p->>'owner_name',''),coalesce(p->>'phone',''),coalesce(p->>'address',''),nullif(p->>'route_id','')::uuid,(p->>'credit_limit')::numeric) RETURNING id INTO v_id;
-  ELSE
-   UPDATE distribution.customers SET name=trim(p->>'name'),owner_name=p->>'owner_name',phone=p->>'phone',address=p->>'address',route_id=nullif(p->>'route_id','')::uuid,credit_limit=(p->>'credit_limit')::numeric WHERE id=(p->>'id')::uuid RETURNING id INTO v_id;
-  END IF; msg:='Customer saved: '||(p->>'name');
- ELSIF action='route' THEN
-  IF length(trim(p->>'name'))<1 THEN RAISE EXCEPTION 'Route name is required'; END IF;
-  INSERT INTO distribution.routes(id,name,area,notes) VALUES(coalesce(nullif(p->>'id','')::uuid,gen_random_uuid()),trim(p->>'name'),coalesce(p->>'area',''),note) ON CONFLICT(id) DO UPDATE SET name=excluded.name,area=excluded.area,notes=excluded.notes RETURNING id INTO v_id; msg:='Route saved: '||(p->>'name');
  ELSIF action='vehicle' THEN
   IF length(trim(p->>'number'))<3 THEN RAISE EXCEPTION 'A valid vehicle number is required'; END IF;
   IF nullif(p->>'salesman_id','') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=(p->>'salesman_id')::uuid AND role IN ('salesman','worker') AND active) THEN RAISE EXCEPTION 'Select an active worker or sales representative'; END IF;
   IF nullif(p->>'id','') IS NOT NULL AND EXISTS(SELECT 1 FROM distribution.vehicles WHERE id=(p->>'id')::uuid AND status IN ('ON ROUTE','RETURNED','RECONCILIATION','LOADED')) THEN RAISE EXCEPTION 'Close the current vehicle day before changing assignments'; END IF;
-  INSERT INTO distribution.vehicles(id,number,type,salesman_id,route_id) VALUES(coalesce(nullif(p->>'id','')::uuid,gen_random_uuid()),upper(trim(p->>'number')),p->>'type',nullif(p->>'salesman_id','')::uuid,nullif(p->>'route_id','')::uuid) ON CONFLICT(id) DO UPDATE SET number=excluded.number,type=excluded.type,salesman_id=excluded.salesman_id,route_id=excluded.route_id,updated_at=now() RETURNING id INTO v_id; msg:='Vehicle saved: '||(p->>'number');
+  INSERT INTO distribution.vehicles(id,number,type,salesman_id) VALUES(coalesce(nullif(p->>'id','')::uuid,gen_random_uuid()),upper(trim(p->>'number')),p->>'type',nullif(p->>'salesman_id','')::uuid) ON CONFLICT(id) DO UPDATE SET number=excluded.number,type=excluded.type,salesman_id=excluded.salesman_id,updated_at=now() RETURNING id INTO v_id; msg:='Vehicle saved: '||(p->>'number');
  ELSIF action='user' THEN
   IF actor_role<>'owner' THEN RAISE EXCEPTION 'Only the owner can manage users'; END IF;
   IF p->>'role'='owner' OR EXISTS(SELECT 1 FROM distribution.users WHERE id=nullif(p->>'id','')::uuid AND role='owner') THEN RAISE EXCEPTION 'The owner account cannot be changed here'; END IF;
@@ -142,9 +132,29 @@ BEGIN
    IF NOT ((v.status='LOADED' AND p->>'status'='ON ROUTE' AND v.active_day=day_now) OR (v.status='ON ROUTE' AND p->>'status'='RETURNED') OR (v.status='RETURNED' AND p->>'status'='RECONCILIATION') OR (v.status IN ('AVAILABLE','CLOSED') AND p->>'status'='MAINTENANCE' AND NOT EXISTS(SELECT 1 FROM distribution.vehicle_stock vs WHERE vs.vehicle_id=v.id AND vs.qty>0)) OR (v.status='MAINTENANCE' AND p->>'status'='AVAILABLE')) THEN RAISE EXCEPTION 'This status change is not permitted'; END IF;
    UPDATE distribution.vehicles SET status=p->>'status',updated_at=now() WHERE id=v.id; v_id:=v.id; msg:=v.number||' · '||(p->>'status');
   ELSIF action='sale' THEN
-   IF v.status<>'ON ROUTE' OR v.active_day<>day_now THEN RAISE EXCEPTION 'Sales require a vehicle on route today'; END IF;
-   SELECT * INTO cust FROM distribution.customers WHERE id=(p->>'customer_id')::uuid FOR UPDATE; IF NOT FOUND THEN RAISE EXCEPTION 'Customer not found'; END IF;
-   IF actor_role='salesman' AND (v.route_id IS NULL OR cust.route_id IS DISTINCT FROM v.route_id) THEN RAISE EXCEPTION 'Customer is not on your route'; END IF;
+   IF v.status<>'ON ROUTE' OR v.active_day<>day_now THEN RAISE EXCEPTION 'Sales require a vehicle dispatched today'; END IF;
+   IF (nullif(p->>'customer_id','') IS NOT NULL) = (p->'buyer' IS NOT NULL AND p->'buyer'<>'null'::jsonb) THEN RAISE EXCEPTION 'Choose an existing buyer or enter a new buyer'; END IF;
+   IF (p ? 'buyer_credit_limit' OR p ? 'buyer_salesman_id') AND actor_role NOT IN ('owner','worker','sales_manager') THEN RAISE EXCEPTION 'Only an owner, worker or sales manager can change buyer credit or access'; END IF;
+   IF nullif(p->>'customer_id','') IS NULL THEN
+    IF length(trim(coalesce(p->'buyer'->>'name',''))) NOT BETWEEN 1 AND 500 THEN RAISE EXCEPTION 'Enter the actual buyer name'; END IF;
+    INSERT INTO distribution.customers(name,phone,address)
+     VALUES(trim(p->'buyer'->>'name'),coalesce(p->'buyer'->>'phone',''),coalesce(p->'buyer'->>'address','')) RETURNING * INTO cust;
+    IF actor_role='salesman' THEN
+     INSERT INTO distribution.buyer_access(customer_id,user_id,granted_by) VALUES(cust.id,actor_id,actor_id);
+    END IF;
+   ELSE
+    SELECT * INTO cust FROM distribution.customers WHERE id=(p->>'customer_id')::uuid FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Buyer not found'; END IF;
+   END IF;
+   IF p ? 'buyer_credit_limit' THEN
+    IF (p->>'buyer_credit_limit')::numeric IS NULL OR (p->>'buyer_credit_limit')::numeric<0 THEN RAISE EXCEPTION 'Credit limit must be non-negative'; END IF;
+    UPDATE distribution.customers SET credit_limit=(p->>'buyer_credit_limit')::numeric WHERE id=cust.id RETURNING * INTO cust;
+   END IF;
+   IF p ? 'buyer_salesman_id' THEN
+    IF NOT EXISTS(SELECT 1 FROM distribution.users WHERE id=(p->>'buyer_salesman_id')::uuid AND role='salesman' AND active) THEN RAISE EXCEPTION 'Choose an active sales representative'; END IF;
+    INSERT INTO distribution.buyer_access(customer_id,user_id,granted_by) VALUES(cust.id,(p->>'buyer_salesman_id')::uuid,actor_id) ON CONFLICT DO NOTHING;
+   END IF;
+   IF actor_role='salesman' AND NOT EXISTS(SELECT 1 FROM distribution.buyer_access WHERE customer_id=cust.id AND user_id=actor_id) THEN RAISE EXCEPTION 'This buyer is not assigned to you'; END IF;
    IF jsonb_typeof(p->'items')<>'array' OR jsonb_array_length(p->'items')=0 THEN RAISE EXCEPTION 'Add at least one product'; END IF;
    v_id:=gen_random_uuid();
    FOR item IN SELECT value FROM jsonb_array_elements(p->'items') LOOP
@@ -168,7 +178,7 @@ BEGIN
    INSERT INTO distribution.sales(id,customer_id,vehicle_id,salesman_id,items,subtotal,discount,tax,total,paid,method,notes,created_by) VALUES(v_id,cust.id,v.id,v.salesman_id,lines,subtotal,discount,tax,total,paid,p->>'method',note,actor_id) RETURNING invoice_no INTO inv_no;
    UPDATE distribution.customers SET balance=balance+total-paid WHERE id=cust.id;
    IF paid>0 THEN INSERT INTO distribution.payments(customer_id,sale_id,amount,method,reference,created_by) VALUES(cust.id,v_id,paid,p->>'method',coalesce(p->>'reference',''),actor_id); END IF;
-   INSERT INTO distribution.visits(customer_id,user_id) VALUES(cust.id,actor_id) ON CONFLICT DO NOTHING; msg:='Sale INV-'||lpad(inv_no::text,6,'0')||' recorded for '||cust.name;
+   msg:='Sale INV-'||lpad(inv_no::text,6,'0')||' recorded for '||cust.name;
   ELSIF action='reconcile' THEN
    IF v.active_day IS NULL OR v.status NOT IN ('LOADED','ON ROUTE','RETURNED','RECONCILIATION') THEN RAISE EXCEPTION 'No open vehicle day to reconcile'; END IF;
    IF p->>'decision' NOT IN ('HOLD','UNLOAD') THEN RAISE EXCEPTION 'Choose HOLD or UNLOAD'; END IF;
@@ -191,20 +201,17 @@ BEGIN
    INSERT INTO distribution.reconciliations(id,vehicle_id,day,decision,items,qty,variance,notes,created_by) VALUES(v_id,v.id,v.active_day,p->>'decision',lines,total_qty,diff,note,actor_id);
    UPDATE distribution.vehicles SET status='CLOSED',updated_at=now() WHERE id=v.id; msg:=v.number||' closed · '||(p->>'decision');
   END IF;
- ELSIF action IN ('payment','visit') THEN
-  SELECT * INTO cust FROM distribution.customers WHERE id=(p->>'customer_id')::uuid FOR UPDATE; IF NOT FOUND THEN RAISE EXCEPTION 'Customer not found'; END IF;
-  IF actor_role='salesman' AND NOT EXISTS(SELECT 1 FROM distribution.vehicles WHERE salesman_id=actor_id AND route_id=cust.route_id) THEN RAISE EXCEPTION 'Customer is not on your route'; END IF;
-  IF action='visit' THEN INSERT INTO distribution.visits(customer_id,user_id) VALUES(cust.id,actor_id) ON CONFLICT DO NOTHING RETURNING id INTO v_id; v_id:=coalesce(v_id,cust.id); msg:='Visit recorded at '||cust.name;
-  ELSE
-   amount:=(p->>'amount')::numeric;
-   IF amount<=0 OR amount>cust.balance THEN RAISE EXCEPTION 'Payment must be positive and cannot exceed outstanding balance'; END IF;
-   INSERT INTO distribution.payments(customer_id,amount,method,reference,created_by) VALUES(cust.id,amount,p->>'method',coalesce(p->>'reference',''),actor_id) RETURNING id INTO v_id;
-   UPDATE distribution.customers SET balance=balance-amount WHERE id=cust.id;
-   paid:=amount;
-   FOR v IN SELECT id,sales.total,sales.paid FROM distribution.sales WHERE customer_id=cust.id AND sales.paid<sales.total ORDER BY created_at,id FOR UPDATE LOOP
-    subtotal:=least(paid,v.total-v.paid); UPDATE distribution.sales SET paid=sales.paid+subtotal WHERE id=v.id; paid:=paid-subtotal; EXIT WHEN paid<=0;
-   END LOOP; msg:='Payment received from '||cust.name;
-  END IF;
+ ELSIF action='payment' THEN
+  SELECT * INTO cust FROM distribution.customers WHERE id=(p->>'customer_id')::uuid FOR UPDATE; IF NOT FOUND THEN RAISE EXCEPTION 'Buyer not found'; END IF;
+  IF actor_role='salesman' AND NOT EXISTS(SELECT 1 FROM distribution.buyer_access WHERE customer_id=cust.id AND user_id=actor_id) THEN RAISE EXCEPTION 'This buyer is not assigned to you'; END IF;
+  amount:=(p->>'amount')::numeric;
+  IF amount<=0 OR amount>cust.balance THEN RAISE EXCEPTION 'Payment must be positive and cannot exceed outstanding balance'; END IF;
+  INSERT INTO distribution.payments(customer_id,amount,method,reference,created_by) VALUES(cust.id,amount,p->>'method',coalesce(p->>'reference',''),actor_id) RETURNING id INTO v_id;
+  UPDATE distribution.customers SET balance=balance-amount WHERE id=cust.id;
+  paid:=amount;
+  FOR v IN SELECT id,sales.total,sales.paid FROM distribution.sales WHERE customer_id=cust.id AND sales.paid<sales.total ORDER BY created_at,id FOR UPDATE LOOP
+   subtotal:=least(paid,v.total-v.paid); UPDATE distribution.sales SET paid=sales.paid+subtotal WHERE id=v.id; paid:=paid-subtotal; EXIT WHEN paid<=0;
+  END LOOP; msg:='Payment received from '||cust.name;
  ELSIF action='mark_read' THEN
   INSERT INTO distribution.notification_reads(user_key,notification_key) SELECT actor_key,jsonb_array_elements_text(p->'keys') ON CONFLICT DO NOTHING; msg:='Notifications marked as read';
  ELSE RAISE EXCEPTION 'Unknown action'; END IF;

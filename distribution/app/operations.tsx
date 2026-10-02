@@ -138,10 +138,7 @@ export function WorkerDashboard({ s, go, open, detail }: PageProps) {
                   <h3>{v.number}</h3>
                   <Badge>{v.status}</Badge>
                 </div>
-                <p className="small muted">
-                  {v.salesman_name || "Unassigned"} ·{" "}
-                  {v.route_name || "No route"}
-                </p>
+                <p className="small muted">{v.salesman_name || "Unassigned"}</p>
                 <StockFlow summary={stockSummary(s, v.id)} />
                 <div className="flex-row flex-wrap">
                   <Btn light onClick={() => detail("vehicles", v)}>

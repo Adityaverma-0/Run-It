@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { InviteButton } from "./access";
 import { WorkerDashboard, AdminDailyPanel } from "./operations";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   AreaChart,
   Area,
@@ -29,9 +30,6 @@ import {
   ChartNoAxesCombined,
   Users,
   Warehouse,
-  MapPin,
-  Phone,
-  Navigation,
   Check,
   Activity,
   FileText,
@@ -42,7 +40,6 @@ import {
   Settings,
   Mail,
 } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Sheet,
   SheetContent,
@@ -129,12 +126,6 @@ export function Dashboard({
       action: "product",
     },
     {
-      key: "customers",
-      label: "Add customers",
-      done: s.customers.length > 0,
-      action: "customer",
-    },
-    {
       key: "vehicles",
       label: "Add vehicles",
       done: s.vehicles.length > 0,
@@ -162,9 +153,6 @@ export function Dashboard({
               <div>
                 <span className="eyebrow">YOUR VEHICLE</span>
                 <h2 className="mt-2">{v.number}</h2>
-                <p className="muted small">
-                  {v.route_name || "No route assigned"}
-                </p>
               </div>
               <Badge>{v.status}</Badge>
             </div>
@@ -188,15 +176,13 @@ export function Dashboard({
             <Empty
               icon={Truck}
               title="No vehicle assigned"
-              description="Your manager can assign a vehicle and route to your account."
+              description="Your manager can assign a vehicle to your account."
             />
           </section>
         )}
         <div className="mobile-actions">
           {[
-            ["customers", "Customers", Users],
             ["payments", "Payments", Wallet],
-            ["routes", "My route", MapPin],
             ["products", "Stock", Package],
           ].map(([id, title, Icon]: any) => (
             <button className="clay" key={id} onClick={() => go(id)}>
@@ -214,45 +200,20 @@ export function Dashboard({
             tone="teal"
           />
           <Kpi
-            title="Shops visited"
-            value={`${new Set(s.visits.filter((x) => x.day === today).map((x) => x.customer_id)).size} / ${s.customers.length}`}
-            foot="On your assigned route"
+            title="Collections today"
+            value={money(
+              sum(
+                s.payments.filter(
+                  (x) =>
+                    day(x.created_at) === today && x.created_by === s.user.id,
+                ),
+                "amount",
+              ),
+            )}
+            foot="Payments you recorded"
             icon={Users}
           />
         </div>
-        <section className="clay panel">
-          <h2>Your shops today</h2>
-          {!s.customers.length ? (
-            <Empty
-              title="No shops on this route"
-              description="Ask your manager to assign customers to your route."
-            />
-          ) : (
-            s.customers.map((c) => (
-              <div className="fleet-row" key={c.id}>
-                <div>
-                  <h3>{c.name}</h3>
-                  <p className="small muted">
-                    {c.address} · Outstanding {money(c.balance)}
-                  </p>
-                </div>
-                <div className="flex-row">
-                  <Btn light onClick={() => detail("customers", c)}>
-                    View
-                  </Btn>
-                  <Btn
-                    onClick={() =>
-                      open("sale", { customer_id: c.id, vehicle_id: v?.id })
-                    }
-                    disabled={v?.status !== "ON ROUTE"}
-                  >
-                    Sale
-                  </Btn>
-                </div>
-              </div>
-            ))
-          )}
-        </section>
       </div>
     );
   return (
@@ -303,7 +264,7 @@ export function Dashboard({
               tone="teal"
             />
             <Kpi
-              title={accountant ? "Payments today" : "Vehicles on route"}
+              title={accountant ? "Payments today" : "Vehicles dispatched"}
               value={
                 accountant
                   ? money(
@@ -318,7 +279,7 @@ export function Dashboard({
                 accountant
                   ? "Confirmed customer collections"
                   : s.vehicles.length
-                    ? "Active across your routes"
+                    ? "Active deliveries"
                     : "Add vehicles to start deliveries"
               }
               icon={accountant ? Wallet : Truck}
@@ -582,7 +543,7 @@ export function Dashboard({
                         {x === "LOADED"
                           ? "Loading"
                           : x === "ON ROUTE"
-                            ? "On route"
+                            ? "Dispatched"
                             : "Returned"}
                       </span>
                     </div>
@@ -607,7 +568,7 @@ export function Dashboard({
                 ) : (
                   <Empty
                     icon={Truck}
-                    title="Ready for your first route"
+                    title="Ready for your first delivery"
                     description="Your vehicles and their live status will appear here."
                   />
                 )}
@@ -701,9 +662,9 @@ export function Dashboard({
             </div>
             <button
               className="text-link"
-              onClick={() => go(accountant ? "customers" : "inventory")}
+              onClick={() => go(accountant ? "payments" : "inventory")}
             >
-              View {accountant ? "customers" : "inventory"}
+              View {accountant ? "payments" : "inventory"}
             </button>
           </div>
           {accountant ? (
@@ -909,44 +870,6 @@ const definitions: Record<
       },
     ],
   },
-  customers: {
-    title: "Customers",
-    action: "customer",
-    button: "Add customer",
-    search: "Search shop, owner or phone",
-    columns: [
-      {
-        key: "name",
-        label: "Customer",
-        render: (r: Row) => (
-          <>
-            <span className="list-title">{r.name}</span>
-            <p className="table-sub">{r.owner_name || r.address}</p>
-          </>
-        ),
-      },
-      { key: "phone", label: "Phone" },
-      {
-        key: "route_name",
-        label: "Route",
-        render: (r: Row) => r.route_name || "Unassigned",
-      },
-      {
-        key: "credit_limit",
-        label: "Credit limit",
-        render: (r: Row) => money(r.credit_limit),
-      },
-      {
-        key: "balance",
-        label: "Outstanding",
-        render: (r: Row) => (
-          <span className={Number(r.balance) > 0 ? "text-amber-700" : ""}>
-            {money(r.balance)}
-          </span>
-        ),
-      },
-    ],
-  },
   vehicles: {
     title: "Vehicles",
     action: "vehicle",
@@ -967,11 +890,6 @@ const definitions: Record<
         key: "salesman_name",
         label: "Salesman",
         render: (r: Row) => r.salesman_name || "Unassigned",
-      },
-      {
-        key: "route_name",
-        label: "Route",
-        render: (r: Row) => r.route_name || "Unassigned",
       },
       {
         key: "status",
@@ -1089,26 +1007,6 @@ const definitions: Record<
       },
     ],
   },
-  routes: {
-    title: "Routes",
-    action: "route",
-    button: "Add route",
-    search: "Search route or area",
-    columns: [
-      {
-        key: "name",
-        label: "Route",
-        render: (r: Row) => <span className="list-title">{r.name}</span>,
-      },
-      { key: "area", label: "Area" },
-      { key: "notes", label: "Notes" },
-      {
-        key: "created_at",
-        label: "Created",
-        render: (r: Row) => date(r.created_at),
-      },
-    ],
-  },
   reconciliation: {
     title: "Reconciliation",
     action: "reconcile",
@@ -1158,19 +1056,15 @@ export function Listing({ page, ...props }: PageProps & { page: string }) {
             : filter === "Inactive"
               ? !r.active
               : r.warehouse_qty <= r.min_stock
-          : page === "customers"
-            ? filter === "Outstanding"
-              ? Number(r.balance) > 0
-              : r.route_id === filter
-            : page === "sales"
-              ? filter === "Paid"
-                ? Number(r.paid) >= Number(r.total)
-                : Number(r.paid) < Number(r.total)
-              : page === "vehicles"
-                ? r.status === filter
-                : page === "payments"
-                  ? r.method === filter
-                  : true),
+          : page === "sales"
+            ? filter === "Paid"
+              ? Number(r.paid) >= Number(r.total)
+              : Number(r.paid) < Number(r.total)
+            : page === "vehicles"
+              ? r.status === filter
+              : page === "payments"
+                ? r.method === filter
+                : true),
     );
   const filterOptions =
     page === "products"
@@ -1179,22 +1073,17 @@ export function Listing({ page, ...props }: PageProps & { page: string }) {
         ? [
             "AVAILABLE",
             "LOADED",
-            "ON ROUTE",
+            { value: "ON ROUTE", label: "Dispatched" },
             "RETURNED",
             "RECONCILIATION",
             "CLOSED",
             "MAINTENANCE",
           ]
-        : page === "customers"
-          ? [
-              "Outstanding",
-              ...s.routes.map((r) => ({ value: r.id, label: r.name })),
-            ]
-          : page === "sales"
-            ? ["Paid", "Pending"]
-            : page === "payments"
-              ? ["CASH", "UPI", "BANK TRANSFER"]
-              : [];
+        : page === "sales"
+          ? ["Paid", "Pending"]
+          : page === "payments"
+            ? ["CASH", "UPI", "BANK TRANSFER"]
+            : [];
   const reset = () => {
     setQ("");
     setFilter("");
@@ -1363,15 +1252,11 @@ export function Listing({ page, ...props }: PageProps & { page: string }) {
             icon={
               page === "vehicles"
                 ? Truck
-                : page === "customers"
-                  ? Users
-                  : page === "sales"
-                    ? ShoppingCart
-                    : page === "payments"
-                      ? Wallet
-                      : page === "routes"
-                        ? MapPin
-                        : Package
+                : page === "sales"
+                  ? ShoppingCart
+                  : page === "payments"
+                    ? Wallet
+                    : Package
             }
             title={`No ${page === "reconciliation" ? "reconciliations" : def.title.toLowerCase()} yet`}
             description={
@@ -1774,166 +1659,6 @@ export function Detail({
             </div>
           </>
         )}
-        {kind === "customers" && (
-          <>
-            <div className="details-list">
-              <div>
-                <span>Owner</span>
-                <b>{row.owner_name || "—"}</b>
-              </div>
-              <div>
-                <span>Phone</span>
-                <b>{row.phone || "—"}</b>
-              </div>
-              <div>
-                <span>Address</span>
-                <b>{row.address || "—"}</b>
-              </div>
-              <div>
-                <span>Route</span>
-                <b>{row.route_name || "Unassigned"}</b>
-              </div>
-            </div>
-            <div className="detail-grid">
-              <div>
-                <span>Total purchases</span>
-                <b>
-                  {money(
-                    sum(
-                      s.sales.filter((x) => x.customer_id === row.id),
-                      "total",
-                    ),
-                  )}
-                </b>
-              </div>
-              <div>
-                <span>Total paid</span>
-                <b>
-                  {money(
-                    sum(
-                      s.payments.filter((x) => x.customer_id === row.id),
-                      "amount",
-                    ),
-                  )}
-                </b>
-              </div>
-              <div>
-                <span>Outstanding</span>
-                <b>{money(row.balance)}</b>
-              </div>
-              <div>
-                <span>Credit limit</span>
-                <b>{money(row.credit_limit)}</b>
-              </div>
-            </div>
-            <div className="detail-actions">
-              {row.phone && (
-                <a
-                  className="btn btn-light"
-                  href={`tel:${row.phone.replace(/[^+0-9]/g, "")}`}
-                >
-                  <Phone size={14} />
-                  Call
-                </a>
-              )}
-              {row.address && (
-                <a
-                  className="btn btn-light"
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(row.address)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Navigation size={14} />
-                  Navigate
-                </a>
-              )}
-              {can(s.user.role, "sale") && (
-                <Btn onClick={() => form("sale", { customer_id: row.id })}>
-                  New sale
-                </Btn>
-              )}
-              {can(s.user.role, "payment") && (
-                <Btn
-                  light
-                  disabled={Number(row.balance) <= 0}
-                  onClick={() => form("payment", { customer_id: row.id })}
-                >
-                  Collect payment
-                </Btn>
-              )}
-              {can(s.user.role, "visit") && (
-                <Btn
-                  light
-                  busy={busy}
-                  onClick={() => perform("visit", { customer_id: row.id })}
-                >
-                  Start visit
-                </Btn>
-              )}
-              {can(s.user.role, "customer") && (
-                <Btn light onClick={() => form("customer")}>
-                  Edit customer
-                </Btn>
-              )}
-            </div>
-            <Tabs defaultValue="sales" className="mt-5">
-              <TabsList>
-                <TabsTrigger value="sales">Sales</TabsTrigger>
-                <TabsTrigger value="payments">Payments</TabsTrigger>
-                <TabsTrigger value="visits">Visits</TabsTrigger>
-              </TabsList>
-              <TabsContent value="sales">
-                <DataTable
-                  rows={s.sales.filter((x) => x.customer_id === row.id)}
-                  columns={[
-                    { key: "invoice_no", label: "Invoice" },
-                    {
-                      key: "created_at",
-                      label: "Date",
-                      render: (r) => date(r.created_at),
-                    },
-                    {
-                      key: "total",
-                      label: "Total",
-                      render: (r) => money(r.total),
-                    },
-                  ]}
-                />
-              </TabsContent>
-              <TabsContent value="payments">
-                <DataTable
-                  rows={s.payments.filter((x) => x.customer_id === row.id)}
-                  columns={[
-                    {
-                      key: "created_at",
-                      label: "Date",
-                      render: (r) => date(r.created_at),
-                    },
-                    { key: "method", label: "Method" },
-                    {
-                      key: "amount",
-                      label: "Amount",
-                      render: (r) => money(r.amount),
-                    },
-                  ]}
-                />
-              </TabsContent>
-              <TabsContent value="visits">
-                <DataTable
-                  rows={s.visits.filter((x) => x.customer_id === row.id)}
-                  columns={[
-                    { key: "day", label: "Visit day" },
-                    {
-                      key: "created_at",
-                      label: "Time",
-                      render: (r) => time(r.created_at),
-                    },
-                  ]}
-                />
-              </TabsContent>
-            </Tabs>
-          </>
-        )}
         {kind === "vehicles" && (
           <>
             <div className="spread">
@@ -1944,10 +1669,6 @@ export function Detail({
               <div>
                 <span>Salesman</span>
                 <b>{row.salesman_name || "Unassigned"}</b>
-              </div>
-              <div>
-                <span>Route</span>
-                <b>{row.route_name || "Unassigned"}</b>
               </div>
               <div>
                 <span>Active vehicle day</span>
@@ -2059,37 +1780,6 @@ export function Detail({
                   </Btn>
                 )}
             </div>
-          </>
-        )}
-        {kind === "routes" && (
-          <>
-            <p className="muted">{row.area}</p>
-            <p>{row.notes}</p>
-            <div className="detail-grid">
-              <div>
-                <span>Customers on route</span>
-                <b>{s.customers.filter((c) => c.route_id === row.id).length}</b>
-              </div>
-              <div>
-                <span>Assigned vehicles</span>
-                <b>{s.vehicles.filter((v) => v.route_id === row.id).length}</b>
-              </div>
-            </div>
-            <DataTable
-              rows={s.customers.filter((c) => c.route_id === row.id)}
-              columns={[
-                { key: "name", label: "Shop" },
-                { key: "address", label: "Address" },
-                {
-                  key: "balance",
-                  label: "Outstanding",
-                  render: (r) => money(r.balance),
-                },
-              ]}
-            />
-            {can(s.user.role, "route") && (
-              <Btn onClick={() => form("route")}>Edit route</Btn>
-            )}
           </>
         )}
         {kind === "sales" && (

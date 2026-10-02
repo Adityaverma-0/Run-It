@@ -3,13 +3,11 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import {
   LayoutDashboard,
   ShoppingCart,
-  Users,
   Package,
   Warehouse,
   Truck,
   ClipboardList,
   Wallet,
-  Map,
   ChartNoAxesCombined,
   ClipboardCheck,
   Bell,
@@ -93,14 +91,12 @@ import {
 const links = [
   ["dashboard", "Overview", LayoutDashboard],
   ["sales", "Sales", ShoppingCart],
-  ["customers", "Customers", Users],
   ["products", "Products", Package],
   ["item-types", "Item types", Package],
   ["inventory", "Inventory", Warehouse],
   ["vehicles", "Vehicles", Truck],
   ["loads", "Loads", ClipboardList],
   ["payments", "Payments", Wallet],
-  ["routes", "Routes", Map],
   ["reports", "Reports", ChartNoAxesCombined],
   ["daily-reports", "Daily reports", ClipboardCheck],
   ["reconciliation", "Reconciliation", ClipboardCheck],
@@ -110,18 +106,15 @@ const links = [
 ] as const;
 const subtitles: Record<string, string> = {
   dashboard:
-    "Here's your distribution overview. Every box, every route, every day.",
+    "Here's your distribution overview. Every box, every sale, every day.",
   "item-types": "Your categories and packaging units, ready for every product.",
   "daily-reports": "Daily sales, stock and team updates in one place.",
   sales: "From the vehicle to the shop. Every order accounted for.",
-  customers:
-    "Your shops, their balances, and the relationships that keep you moving.",
   products: "A well-organised catalogue. Ready for every order.",
   inventory: "Know what is available, where it is, and where it went.",
   vehicles: "Keep your fleet and every unit on board in view.",
   loads: "Start the day with the right stock on the right vehicle.",
   payments: "Clear collections. Accurate customer balances.",
-  routes: "Plan the shops and territories your team serves.",
   reports: "Turn your daily operations into a clear business picture.",
   reconciliation:
     "Close the day with confidence. Count, confirm, carry forward.",
@@ -735,11 +728,9 @@ export default function Workspace() {
                             {time(p.createdAt)}
                           </p>
                           <p className="small muted">
-                            {
-                              s?.customers.find(
-                                (c) => c.id === p.data.customer_id,
-                              )?.name
-                            }
+                            {s?.customers.find(
+                              (c) => c.id === p.data.customer_id,
+                            )?.name || p.data.buyer?.name}
                           </p>
                           {p.error && (
                             <p className="small text-red-700 mt-2">{p.error}</p>
@@ -781,13 +772,7 @@ export default function Workspace() {
         <nav className="bottom-nav">
           {nav
             .filter((x) =>
-              [
-                "dashboard",
-                "sales",
-                "customers",
-                "inventory",
-                "loads",
-              ].includes(x[0]),
+              ["dashboard", "sales", "inventory", "loads"].includes(x[0]),
             )
             .slice(0, 4)
             .map(([id, label, Icon]) => (
@@ -845,9 +830,9 @@ export default function Workspace() {
         open={search}
         onOpenChange={setSearch}
         title="Search your workspace"
-        description="Find products, shops, vehicles, sales and payments."
+        description="Find products, vehicles, sales and payments."
       >
-        <CommandInput placeholder="Search products, customers, vehicles, invoices..." />
+        <CommandInput placeholder="Search products, vehicles, invoices..." />
         <CommandList>
           <CommandEmpty>No matching records.</CommandEmpty>
           <CommandGroup heading="Go to">
@@ -863,15 +848,7 @@ export default function Workspace() {
             ))}
           </CommandGroup>
           {s &&
-            (
-              [
-                "products",
-                "customers",
-                "vehicles",
-                "sales",
-                "payments",
-              ] as const
-            )
+            (["products", "vehicles", "sales", "payments"] as const)
               .filter((kind) => nav.some((n) => n[0] === kind))
               .map((kind) => (
                 <CommandGroup heading={kind} key={kind}>

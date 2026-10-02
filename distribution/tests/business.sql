@@ -1,7 +1,7 @@
 CREATE OR REPLACE FUNCTION distribution.check_true(condition boolean,label text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN IF condition IS DISTINCT FROM true THEN RAISE EXCEPTION 'FAIL: %',label; END IF; RAISE NOTICE 'PASS: %',label; END $$;
 CREATE OR REPLACE FUNCTION distribution.expect_error(action text,p jsonb,role text,pattern text) RETURNS void LANGUAGE plpgsql AS $$ BEGIN BEGIN PERFORM distribution.apply_action(action,p,null,role,'qa',gen_random_uuid()); EXCEPTION WHEN OTHERS THEN IF SQLERRM NOT ILIKE '%'||pattern||'%' THEN RAISE EXCEPTION 'Wrong error: % (expected %)',SQLERRM,pattern; END IF; RAISE NOTICE 'PASS: rejects %',pattern; RETURN; END; RAISE EXCEPTION 'Expected rejection: %',pattern; END $$;
 DO $$
-DECLARE p uuid; p2 uuid; c uuid; v uuid; u uuid; r uuid; sale uuid; request_uuid uuid; result jsonb; payload jsonb;
+DECLARE p uuid; p2 uuid; c uuid; v uuid; u uuid; sale uuid; request_uuid uuid; result jsonb; payload jsonb;
 BEGIN
  INSERT INTO distribution.users(name,email,role) VALUES('Isolated test representative','isolated@example.invalid','salesman') RETURNING users.id INTO u;
  PERFORM distribution.check_true((distribution.resolve_member('owner@example.invalid','Isolated owner')->>'role')='owner','Owner bootstrap works when staff already exist');
@@ -9,11 +9,10 @@ BEGIN
  UPDATE distribution.users SET active=false WHERE users.id=u;
  PERFORM distribution.check_true(distribution.resolve_member('isolated@example.invalid','Inactive') IS NULL,'Inactive accounts are denied');
  UPDATE distribution.users SET active=true WHERE users.id=u;
- result:=distribution.apply_action('route','{"name":"Isolated test route","area":""}',null,'owner','qa',gen_random_uuid()); r:=(result->>'id')::uuid;
  result:=distribution.apply_action('product','{"name":"Isolated test product","sku":"QA-ONLY","brand":"","category":"","unit":"Packet","box_size":12,"carton_size":144,"price":100,"cost":60,"tax_rate":5,"min_stock":10}',null,'owner','qa',gen_random_uuid()); p:=(result->>'id')::uuid;
  result:=distribution.apply_action('product','{"name":"Isolated second product","sku":"QA-ONLY-2","brand":"","category":"","unit":"Packet","box_size":12,"carton_size":144,"price":50,"cost":30,"tax_rate":0,"min_stock":0}',null,'owner','qa',gen_random_uuid()); p2:=(result->>'id')::uuid;
- result:=distribution.apply_action('customer',jsonb_build_object('name','Isolated shop','credit_limit',2000,'route_id',r),null,'owner','qa',gen_random_uuid()); c:=(result->>'id')::uuid;
- result:=distribution.apply_action('vehicle',jsonb_build_object('number','QA-ONLY','type','Van','salesman_id',u,'route_id',r),null,'owner','qa',gen_random_uuid()); v:=(result->>'id')::uuid;
+ INSERT INTO distribution.customers(name,credit_limit) VALUES('Isolated shop',2000) RETURNING id INTO c;
+ result:=distribution.apply_action('vehicle',jsonb_build_object('number','QA-ONLY','type','Van','salesman_id',u),null,'owner','qa',gen_random_uuid()); v:=(result->>'id')::uuid;
  PERFORM distribution.apply_action('inventory',jsonb_build_object('product_id',p,'qty',100,'kind','RECEIPT'),null,'owner','qa',gen_random_uuid());
  PERFORM distribution.apply_action('inventory',jsonb_build_object('product_id',p2,'qty',10,'kind','RECEIPT'),null,'owner','qa',gen_random_uuid());
  PERFORM distribution.expect_error('load',jsonb_build_object('vehicle_id',v,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',101))),'owner','Insufficient warehouse stock');
@@ -21,7 +20,7 @@ BEGIN
  PERFORM distribution.apply_action('load',jsonb_build_object('vehicle_id',v,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',30),jsonb_build_object('product_id',p2,'qty',10))),null,'owner','qa',gen_random_uuid());
  PERFORM distribution.check_true((SELECT warehouse_qty=70 FROM distribution.products WHERE id=p),'Load deducts warehouse stock');
  PERFORM distribution.check_true((SELECT qty=30 FROM distribution.vehicle_stock WHERE vehicle_id=v AND product_id=p),'Load adds vehicle stock');
- PERFORM distribution.expect_error('sale',jsonb_build_object('vehicle_id',v,'customer_id',c,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',1)),'method','CREDIT','paid',0),'owner','on route');
+ PERFORM distribution.expect_error('sale',jsonb_build_object('vehicle_id',v,'customer_id',c,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',1)),'method','CREDIT','paid',0),'owner','dispatched');
  PERFORM distribution.apply_action('vehicle_status',jsonb_build_object('vehicle_id',v,'status','ON ROUTE'),null,'owner','qa',gen_random_uuid());
  PERFORM distribution.expect_error('sale',jsonb_build_object('vehicle_id',v,'customer_id',c,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',31)),'method','CREDIT','paid',0),'owner','Insufficient vehicle stock');
  PERFORM distribution.expect_error('sale',jsonb_build_object('vehicle_id',v,'customer_id',c,'items',jsonb_build_array(jsonb_build_object('product_id',p,'qty',25)),'method','CREDIT','paid',0),'owner','credit limit');
@@ -30,7 +29,7 @@ BEGIN
  PERFORM distribution.check_true((SELECT total=945 AND subtotal=1000 AND tax=45 AND paid=500 FROM distribution.sales WHERE sales.id=sale),'Discounted tax and final total calculated on server');
  PERFORM distribution.check_true((SELECT balance=445 FROM distribution.customers WHERE customers.id=c),'Credit reflects unpaid amount');
  PERFORM distribution.apply_action('sale',payload,null,'owner','qa',request_uuid);
- PERFORM distribution.check_true((SELECT count(*)=1 FROM distribution.sales),'Retry does not duplicate sale');
+ PERFORM distribution.check_true((SELECT count(*)=1 FROM distribution.sales WHERE customer_id=c),'Retry does not duplicate sale');
  PERFORM distribution.check_true((SELECT qty=20 FROM distribution.vehicle_stock WHERE vehicle_id=v AND product_id=p),'Retry does not deduct stock twice');
  PERFORM distribution.expect_error('payment',jsonb_build_object('customer_id',c,'amount',446,'method','CASH'),'owner','cannot exceed');
  PERFORM distribution.apply_action('payment',jsonb_build_object('customer_id',c,'amount',200,'method','UPI'),null,'accountant','qa',gen_random_uuid());

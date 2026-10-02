@@ -12,11 +12,15 @@ const migration = fs
   .readdirSync("db")
   .filter((f) => /^\d+.*\.sql$/.test(f))
   .sort()
-  .map((f) =>
-    fs
-      .readFileSync(`db/${f}`, "utf8")
-      .replace(/^BEGIN;/, "")
-      .replace(/COMMIT;\s*$/, ""),
+  .map(
+    (f) =>
+      (f === "004_buyer_access.sql"
+        ? fs.readFileSync("tests/legacy-buyers.sql", "utf8") + "\n"
+        : "") +
+      fs
+        .readFileSync(`db/${f}`, "utf8")
+        .replace(/^BEGIN;/, "")
+        .replace(/COMMIT;\s*$/, ""),
   )
   .join("\n");
 const tests =
@@ -24,7 +28,16 @@ const tests =
   "\n" +
   fs.readFileSync("tests/auth.sql", "utf8") +
   "\n" +
-  fs.readFileSync("tests/workers.sql", "utf8");
+  fs.readFileSync("tests/workers.sql", "utf8") +
+  "\n" +
+  fs.readFileSync("tests/buyers.sql", "utf8") +
+  "\n" +
+  fs
+    .readFileSync("db/004_buyer_access.sql", "utf8")
+    .replace(/^BEGIN;/, "")
+    .replace(/COMMIT;\s*$/, "") +
+  "\n" +
+  fs.readFileSync("tests/buyer-migration-replay.sql", "utf8");
 const sql =
   "BEGIN;\n" +
   (migration + tests).replaceAll("distribution", schema) +

@@ -67,7 +67,6 @@ export default function Reports({ s }: PageProps) {
   const [salesman, setSalesman] = useState("");
   const [product, setProduct] = useState("");
   const [customer, setCustomer] = useState("");
-  const [route, setRoute] = useState("");
   const inDate = (r: Row) =>
     day(r.created_at) >= from && day(r.created_at) <= to;
   const matches = (r: Row) =>
@@ -75,7 +74,6 @@ export default function Reports({ s }: PageProps) {
     (!vehicle || r.vehicle_id === vehicle) &&
     (!salesman || r.salesman_id === salesman) &&
     (!customer || r.customer_id === customer) &&
-    (!route || r.route_id === route) &&
     (!product || r.items?.some((i: Row) => i.product_id === product));
   const sales = s.sales.filter(matches);
   let rows: Row[] = [];
@@ -130,16 +128,10 @@ export default function Reports({ s }: PageProps) {
       }));
   if (selected === "outstanding")
     rows = s.customers
-      .filter(
-        (c) =>
-          Number(c.balance) > 0 &&
-          (!customer || c.id === customer) &&
-          (!route || c.route_id === route),
-      )
+      .filter((c) => Number(c.balance) > 0 && (!customer || c.id === customer))
       .map((c) => ({
         Customer: c.name,
         Phone: c.phone,
-        Route: c.route_name || "Unassigned",
         Outstanding: Number(c.balance),
         "Credit limit": Number(c.credit_limit),
       }));
@@ -149,7 +141,6 @@ export default function Reports({ s }: PageProps) {
         (p) =>
           inDate(p) &&
           (!customer || p.customer_id === customer) &&
-          (!route || p.route_id === route) &&
           (!salesman || p.created_by === salesman) &&
           (!vehicle ||
             s.sales.some(
@@ -178,9 +169,6 @@ export default function Reports({ s }: PageProps) {
           (!salesman ||
             s.vehicles.find((v) => v.id === r.vehicle_id)?.salesman_id ===
               salesman) &&
-          (!route ||
-            s.vehicles.find((v) => v.id === r.vehicle_id)?.route_id ===
-              route) &&
           (!product || r.items.some((i: Row) => i.product_id === product)),
       )
       .map((r) => ({
@@ -201,9 +189,6 @@ export default function Reports({ s }: PageProps) {
           (!salesman ||
             s.vehicles.find((v) => v.id === m.vehicle_id)?.salesman_id ===
               salesman) &&
-          (!route ||
-            s.vehicles.find((v) => v.id === m.vehicle_id)?.route_id ===
-              route) &&
           (selected !== "damage" || ["DAMAGE", "LOSS"].includes(m.kind)),
       )
       .map((m) => ({
@@ -266,7 +251,6 @@ export default function Reports({ s }: PageProps) {
               setSalesman("");
               setProduct("");
               setCustomer("");
-              setRoute("");
             }}
           >
             <Icon size={23} />
@@ -364,17 +348,6 @@ export default function Reports({ s }: PageProps) {
                 onChange={setCustomer}
                 options={options(s.customers)}
                 placeholder="All customers"
-              />
-            </Field>
-          )}
-          {!["warehouse", "low"].includes(selected) && (
-            <Field label="Route">
-              <Pick
-                label="Route filter"
-                value={route}
-                onChange={setRoute}
-                options={options(s.routes)}
-                placeholder="All routes"
               />
             </Field>
           )}

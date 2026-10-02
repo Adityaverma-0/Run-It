@@ -7,13 +7,11 @@ export type State = {
   vehicles: Row[];
   stock: Row[];
   days: Row[];
-  routes: Row[];
   sales: Row[];
   payments: Row[];
   loads: Row[];
   reconciliations: Row[];
   movements: Row[];
-  visits: Row[];
   activity: Row[];
   users: Row[];
   itemTypes: Row[];
@@ -65,14 +63,12 @@ export const permissions: Record<string, string[]> = {
   worker: [
     "dashboard",
     "sales",
-    "customers",
     "products",
     "item-types",
     "inventory",
     "vehicles",
     "loads",
     "payments",
-    "routes",
     "reports",
     "daily-reports",
     "reconciliation",
@@ -103,11 +99,9 @@ export const permissions: Record<string, string[]> = {
   sales_manager: [
     "dashboard",
     "sales",
-    "customers",
     "products",
     "vehicles",
     "payments",
-    "routes",
     "reports",
     "reconciliation",
     "notifications",
@@ -116,11 +110,9 @@ export const permissions: Record<string, string[]> = {
   salesman: [
     "dashboard",
     "sales",
-    "customers",
     "products",
     "vehicles",
     "payments",
-    "routes",
     "reconciliation",
     "notifications",
     "sync",
@@ -128,7 +120,6 @@ export const permissions: Record<string, string[]> = {
   accountant: [
     "dashboard",
     "sales",
-    "customers",
     "payments",
     "reports",
     "notifications",
@@ -140,15 +131,12 @@ export const actions: Record<string, string[]> = {
   worker: [
     "product",
     "item_type",
-    "customer",
-    "route",
     "vehicle",
     "inventory",
     "load",
     "start_day",
     "sale",
     "payment",
-    "visit",
     "vehicle_status",
     "reconcile",
     "submit_daily_report",
@@ -173,23 +161,13 @@ export const actions: Record<string, string[]> = {
     "mark_read",
   ],
   sales_manager: [
-    "customer",
-    "route",
     "sale",
     "payment",
-    "visit",
     "vehicle_status",
     "reconcile",
     "mark_read",
   ],
-  salesman: [
-    "sale",
-    "payment",
-    "visit",
-    "vehicle_status",
-    "reconcile",
-    "mark_read",
-  ],
+  salesman: ["sale", "payment", "vehicle_status", "reconcile", "mark_read"],
   accountant: ["payment", "mark_read"],
 };
 export const can = (role: string, action: string) =>
@@ -255,14 +233,12 @@ export function notifications(s: State) {
             payment: "payments",
             load: "loads",
             reconcile: "reconciliation",
-            customer: "customers",
             vehicle: "vehicles",
             product: "products",
             inventory: "inventory",
             item_type: "item-types",
             submit_daily_report: "daily-reports",
             review_daily_report: "daily-reports",
-            route: "routes",
             user: "settings",
           } as any
         )[a.action] || "dashboard",

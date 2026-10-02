@@ -79,7 +79,7 @@ export function Badge({ children }: any) {
     <span
       className={`badge ${["ON ROUTE", "Active", "Paid", "Synced", "RECEIPT", "HOLD"].includes(v) ? "green" : ["LOADED", "RETURNED", "RECONCILIATION", "Pending", "Low stock", "CREDIT"].includes(v) ? "amber" : ["MAINTENANCE", "Failed", "Inactive", "DAMAGE", "LOSS", "Overdue"].includes(v) ? "red" : ""}`}
     >
-      {children}
+      {v === "ON ROUTE" ? "Dispatched" : children}
     </span>
   );
 }
